@@ -1,0 +1,38 @@
+# Real-world URL forms and the canonical identity they must collapse onto.
+# Format: <input> | <expected canonical> | <what this row pins down>
+# '#' starts a comment line; blank lines are ignored.
+
+https://www.spiegel.de/politik/deutschland/artikel-a-123.html?utm_source=twitter&utm_medium=social | https://spiegel.de/politik/deutschland/artikel-a-123.html | utm_* campaign tagging and the www label
+http://www.zeit.de/politik/2026-08/artikel?wt_mc=nl.ref.zeitde | https://zeit.de/politik/2026-08/artikel | Webtrekk wt_* and http folded to https
+https://m.faz.net/aktuell/politik/story-19834.html | https://faz.net/aktuell/politik/story-19834.html | mobile host label
+https://mobile.reuters.com/article/idUSKBN123?feature=related | https://reuters.com/article/idUSKBN123 | mobile. host and a share/feature tag
+https://amp.theguardian.com/world/2026/aug/23/story?CMP=share_btn_tw | https://theguardian.com/world/2026/aug/23/story | amp. host and Guardian CMP, matched case-insensitively
+https://www.theguardian.com/world/2026/aug/23/story/amp | https://theguardian.com/world/2026/aug/23/story | trailing /amp path segment folds onto the same identity as the row above
+https://www-bbc-co-uk.cdn.ampproject.org/c/s/www.bbc.co.uk/news/world-12345678.amp | https://bbc.co.uk/news/world-12345678 | Google AMP cache URL unwrapped, .amp suffix removed
+https://www.bbc.co.uk/news/world-12345678?at_medium=RSS&at_campaign=KARANGA | https://bbc.co.uk/news/world-12345678 | BBC at_* parameters
+https://www.bbc.co.uk/news/world-12345678?ns_mchannel=social&ns_source=twitter | https://bbc.co.uk/news/world-12345678 | BBC ns_* parameters reach the same identity as the AMP cache row
+https://www.reuters.com/world/europe/story-2026-08-23/?outputType=amp | https://reuters.com/world/europe/story-2026-08-23 | outputType=amp rendition marker and trailing slash
+https://www.aljazeera.com/news/2026/8/23/story?amp | https://aljazeera.com/news/2026/8/23/story | valueless amp marker
+https://www.nytimes.com/2026/08/23/world/europe/story.html?smid=tw-share&smtyp=cur | https://nytimes.com/2026/08/23/world/europe/story.html | NYT share tags
+https://www.heise.de/news/Meldung-9876543.html?etcc_cmp=nl&etcc_med=nl | https://heise.de/news/Meldung-9876543.html | etracker etcc_* parameters
+https://www.tagesschau.de/inland/artikel-100.html#hauptinhalt | https://tagesschau.de/inland/artikel-100.html | fragment never identifies an article
+https://www.lemonde.fr/international/article/2026/08/23/titre_1234.html?xtor=RSS-3208 | https://lemonde.fr/international/article/2026/08/23/titre_1234.html | AT Internet xtor
+https://www.derstandard.at/story/300000123456/titel?ref=rss | https://derstandard.at/story/300000123456/titel | generic referral tag
+https://www.washingtonpost.com/world/2026/08/23/story/?fbclid=IwAR123abc | https://washingtonpost.com/world/2026/08/23/story | Facebook click id
+https://www.ft.com/content/abcdef12-3456?gclid=Cj0KCQ&mc_cid=99aa | https://ft.com/content/abcdef12-3456 | Google click id and Mailchimp campaign id
+https://www.dailymail.co.uk/m/news/article-1234567/Title.html?ito=social-twitter | https://dailymail.co.uk/news/article-1234567/Title.html | leading /m/ path segment plus ito
+https://news.example.org/2026/08/story.html?m=1 | https://news.example.org/2026/08/story.html | Blogger-style mobile rendition flag
+https://www.nzz.ch/international/story-ld.1789456?reduced=true | https://nzz.ch/international/story-ld.1789456?reduced=true | unknown parameter is preserved, not guessed away
+https://www.golem.de/news/artikel-2608-123456.html?page=2&utm_source=rss | https://golem.de/news/artikel-2608-123456.html?page=2 | pagination survives while tracking is dropped
+https://example-news.com/story?b=2&a=1 | https://example-news.com/story?a=1&b=2 | parameters sorted by name
+https://example-news.com/story?a=1&b=2 | https://example-news.com/story?a=1&b=2 | the sorted form is already canonical
+https://www.welt.de:443/politik/article123456789/Titel.html | https://welt.de/politik/article123456789/Titel.html | default https port dropped
+http://www.sueddeutsche.de:80/politik/thema-1.6789012 | https://sueddeutsche.de/politik/thema-1.6789012 | default http port dropped
+https://staging.example-news.com:8443/politik/artikel-7 | https://staging.example-news.com:8443/politik/artikel-7 | non-default port is part of the address and stays
+https://www.tagesanzeiger.ch/foo/../schweiz/artikel-123456789 | https://tagesanzeiger.ch/schweiz/artikel-123456789 | dot segments resolved
+https://www.srf.ch//news//international/artikel-999 | https://srf.ch/news/international/artikel-999 | repeated slashes collapsed
+https://edition.cnn.com/2026/08/23/europe/story/ | https://edition.cnn.com/2026/08/23/europe/story | trailing slash dropped, edition. is a real host label and stays
+https://www.blick.ch/ausland/artikel-%c3%bcber-etwas-id123.html | https://blick.ch/ausland/artikel-%C3%BCber-etwas-id123.html | percent escapes upper-cased
+HTTPS://WWW.Watson.CH/schweiz/123456-titel | https://watson.ch/schweiz/123456-titel | scheme and host lower-cased, path case preserved
+https://user:secret@www.orf.at/stories/3412345/ | https://orf.at/stories/3412345 | credentials are not identity
+https://www.faz.net/aktuell/feuilleton/artikel-19834.amp.html | https://faz.net/aktuell/feuilleton/artikel-19834.html | .amp infix before the extension
