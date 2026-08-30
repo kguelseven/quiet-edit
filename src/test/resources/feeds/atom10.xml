@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+  <title>Example Wire — World</title>
+  <subtitle>Reporting from the Example Wire newsroom</subtitle>
+  <link rel="self" href="https://wire.example.test/world/atom.xml"/>
+  <link rel="alternate" type="text/html" href="https://wire.example.test/world"/>
+  <id>tag:wire.example.test,2019:/world</id>
+  <updated>2026-08-18T07:31:04Z</updated>
+  <entry>
+    <title>Central bank holds rates for a third meeting</title>
+    <link rel="alternate" type="text/html" href="https://wire.example.test/world/2026/08/18/central-bank-holds-rates"/>
+    <id>tag:wire.example.test,2026:world/9931204</id>
+    <published>2026-08-18T06:02:00Z</published>
+    <updated>2026-08-18T07:12:48Z</updated>
+    <summary type="html">&lt;p&gt;Policymakers pointed to sticky services inflation, but signalled that a cut remains possible before the year ends.&lt;/p&gt;</summary>
+    <author><name>D. Ferreira</name></author>
+    <category term="economy"/>
+  </entry>
+  <entry>
+    <title>Rescue teams reach villages cut off by flooding</title>
+    <link rel="alternate" type="text/html" href="https://wire.example.test/world/2026/08/17/flood-rescue-villages"/>
+    <link rel="related" type="text/html" href="https://wire.example.test/world/2026/08/16/flood-warning"/>
+    <id>tag:wire.example.test,2026:world/993088</id>
+    <published>2026-08-17T19:44:00Z</published>
+    <updated>2026-08-17T19:44:00Z</updated>
+    <content type="html">&lt;p&gt;Helicopters delivered supplies to four settlements on Sunday. Road access is not expected to be restored this week.&lt;/p&gt;</content>
+  </entry>
+</feed>

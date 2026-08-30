@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Partly Broken Feed</title>
+    <link>https://partly.example.test/rss.xml</link>
+    <description>Some items are unusable, most are not</description>
+    <item>
+      <title>Perfectly usable item</title>
+      <link>https://partly.example.test/usable-1.html</link>
+      <description>Nothing wrong here.</description>
+      <pubDate>Tue, 18 Aug 2026 07:14:00 +0200</pubDate>
+      <guid isPermaLink="false">usable-1</guid>
+    </item>
+    <item>
+      <title>Announcement without a link</title>
+      <description>An editorial note that points nowhere.</description>
+      <pubDate>Tue, 18 Aug 2026 06:00:00 +0200</pubDate>
+    </item>
+    <item>
+      <title>Item whose link is only whitespace</title>
+      <link>   </link>
+      <description>Also unusable.</description>
+    </item>
+    <item>
+      <link>https://partly.example.test/usable-2.html</link>
+    </item>
+  </channel>
+</rss>
