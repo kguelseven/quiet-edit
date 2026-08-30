@@ -21,3 +21,9 @@ spring:
 logging:
   level:
     org.flywaydb: INFO
+
+quietedit:
+  ingest:
+    schedule:
+      # A run that fires on its own would race the run a test triggers deliberately.
+      enabled: false

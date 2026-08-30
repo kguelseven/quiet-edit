@@ -2,12 +2,20 @@ package org.korhan.quietedit.ingest;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.net.http.HttpClient;
 import java.time.Clock;
 
-/** Collaborators the ingest components cannot construct themselves. */
+/**
+ * Collaborators the ingest components cannot construct themselves.
+ *
+ * <p>Scheduling is enabled here rather than on the application class: the only
+ * scheduled work in this system is the ingest poll, and keeping the switch next to
+ * it means the feature area owns its own timer.
+ */
 @Configuration(proxyBeanMethods = false)
+@EnableScheduling
 public class IngestConfiguration {
 
     /**

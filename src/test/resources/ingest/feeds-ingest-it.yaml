@@ -1,0 +1,10 @@
+# Catalogue for the full ingest integration test. Every URL points at WireMock:
+# the checked-in feeds.yaml names real publishers and must never be reachable
+# from a test.
+feeds:
+  - url: "${test.wiremock.base-url}/broken.xml"
+    name: "Broken"
+  - url: "${test.wiremock.base-url}/press.xml"
+    name: "Press"
+  - url: "${test.wiremock.base-url}/wire.xml"
+    name: "Wire"
