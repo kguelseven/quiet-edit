@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:18.6
+    container_name: quietedit-postgres
+    # Non-default host port so the local dev database never collides with
+    # another Postgres already listening on 5432.
+    ports:
+      - "55432:5432"
+    environment:
+      POSTGRES_DB: ${QUIETEDIT_DB_NAME:-quietedit}
+      POSTGRES_USER: ${QUIETEDIT_DB_USER:-quietedit}
+      POSTGRES_PASSWORD: ${QUIETEDIT_DB_PASSWORD:-quietedit}
+    volumes:
+      - quietedit-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${QUIETEDIT_DB_USER:-quietedit} -d ${QUIETEDIT_DB_NAME:-quietedit}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  quietedit-pgdata:
+    name: quietedit-pgdata

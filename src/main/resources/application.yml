@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: quietedit
+  datasource:
+    url: ${QUIETEDIT_DB_URL:jdbc:postgresql://localhost:55432/quietedit}
+    username: ${QUIETEDIT_DB_USER:quietedit}
+    password: ${QUIETEDIT_DB_PASSWORD:quietedit}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema; Hibernate must never touch DDL.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+server:
+  port: ${QUIETEDIT_PORT:8080}
+
+logging:
+  level:
+    org.korhan.quietedit: INFO
