@@ -36,6 +36,18 @@ quietedit:
       max-attempts: 3
       initial-backoff: 500ms
       backoff-multiplier: 2
+    article:
+      # Article requests reuse the fetch timeouts, retry budget and host interval
+      # above; only these limits are article-specific.
+      max-redirects: 5
+      max-body-size: 8MB
+      robots-cache-ttl: 1h
+      # Shorter, so an unreadable robots.txt does not block a host for an hour.
+      robots-failure-cache-ttl: 5m
+      # Ceiling for a robots.txt Crawl-delay, so one host cannot stall a run.
+      max-crawl-delay: 30s
+      # Raw HTML lives outside the database; only the ref is persisted.
+      storage-root: ${QUIETEDIT_RAW_HTML_DIR:./data/raw-html}
 
 server:
   port: ${QUIETEDIT_PORT:8080}

@@ -17,5 +17,8 @@ LOG.md
 .classpath
 .project
 
+# Raw article HTML: the store default, never checked in.
+data/
+
 # Local overrides
 .env

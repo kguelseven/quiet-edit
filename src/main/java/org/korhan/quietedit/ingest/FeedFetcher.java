@@ -31,15 +31,17 @@ public class FeedFetcher {
 
     private static final Logger log = LoggerFactory.getLogger(FeedFetcher.class);
 
-    private final HttpClient httpClient;
+    private final HttpClient feedHttpClient;
     private final FeedFetchProperties properties;
     private final HostRateLimiter rateLimiter;
     private final Clock clock;
     private final Sleeper sleeper;
 
-    public FeedFetcher(HttpClient httpClient, FeedFetchProperties properties,
+    // The parameter is named after the bean on purpose: there are two HttpClient
+    // beans, and the article one must never be injected here (it follows no redirects).
+    public FeedFetcher(HttpClient feedHttpClient, FeedFetchProperties properties,
                        HostRateLimiter rateLimiter, Clock clock, Sleeper sleeper) {
-        this.httpClient = httpClient;
+        this.feedHttpClient = feedHttpClient;
         this.properties = properties;
         this.rateLimiter = rateLimiter;
         this.clock = clock;
@@ -64,7 +66,7 @@ public class FeedFetcher {
         for (int attempt = 1; attempt <= properties.maxAttempts(); attempt++) {
             try {
                 HttpResponse<byte[]> response = rateLimiter.call(
-                        uri.getHost(), () -> httpClient.send(request(feed, uri), HttpResponse.BodyHandlers.ofByteArray()));
+                        uri.getHost(), () -> feedHttpClient.send(request(feed, uri), HttpResponse.BodyHandlers.ofByteArray()));
                 int status = response.statusCode();
                 Instant fetchedAt = clock.instant();
 

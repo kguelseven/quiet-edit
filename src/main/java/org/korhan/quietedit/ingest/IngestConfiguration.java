@@ -24,6 +24,20 @@ public class IngestConfiguration {
                 .build();
     }
 
+    /**
+     * A second client, identical except that it never follows a redirect itself:
+     * article fetching walks the chain hop by hop so that it can record the final URL
+     * and re-check robots.txt before each hop. A client-followed redirect would
+     * already have sent the request the guard was meant to prevent.
+     */
+    @Bean
+    HttpClient articleHttpClient(FeedFetchProperties properties) {
+        return HttpClient.newBuilder()
+                .connectTimeout(properties.connectTimeout())
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .build();
+    }
+
     @Bean
     Clock clock() {
         return Clock.systemUTC();
