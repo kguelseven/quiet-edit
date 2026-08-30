@@ -21,7 +21,7 @@ Acceptance:
 - FeedParser walks the XML once with jsoup, using Parser.xmlParser() so
   case and namespace prefixes are preserved, and builds FeedEntry directly.
   RSS 2.0 and Atom both supported, callers see no difference.
-- Both the parsed value and the publisher's verbatim text survive for
+- Both the parsed value and the verbatim text as published survive for
   every date field; no positional matching anywhere.
 - Rome is removed from the parser and from pom.xml.
 - The existing FeedParserTest passes unchanged, including the malformed
