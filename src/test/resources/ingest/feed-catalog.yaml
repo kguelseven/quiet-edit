@@ -1,0 +1,13 @@
+feeds:
+  - url: "https://example.test/rss.xml"
+    name: "Example"
+  - url: "${test.catalog.base-url}/atom.xml"
+    name: "From placeholder"
+  - url: "   "
+    name: "Blank url"
+  - url: "https://example.test/nameless.xml"
+    name: ""
+  - url: "https://example.test/rss.xml"
+    name: "Duplicate of the first"
+  - url: "  https://example.test/untrimmed.xml  "
+    name: "  Untrimmed  "

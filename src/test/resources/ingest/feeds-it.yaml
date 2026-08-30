@@ -1,0 +1,7 @@
+# Catalogue used by the ingest integration test. Points at WireMock, never at a
+# real publisher: the checked-in feeds.yaml must not be reachable from a test.
+feeds:
+  - url: "${test.wiremock.base-url}/broken.xml"
+    name: "Broken"
+  - url: "${test.wiremock.base-url}/healthy.xml"
+    name: "Healthy"

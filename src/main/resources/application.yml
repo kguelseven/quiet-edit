@@ -18,6 +18,24 @@ spring:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: false
+  mvc:
+    # RFC 7807 for every error response; stack traces never leave the process.
+    problemdetails:
+      enabled: true
+
+quietedit:
+  ingest:
+    catalog:
+      location: ${QUIETEDIT_FEEDS_FILE:file:./feeds.yaml}
+    fetch:
+      connect-timeout: 5s
+      request-timeout: 15s
+      # Per host, not per feed: several feeds can share one origin.
+      min-host-interval: 2s
+      # Counts the first try, so this is one try plus two retries.
+      max-attempts: 3
+      initial-backoff: 500ms
+      backoff-multiplier: 2
 
 server:
   port: ${QUIETEDIT_PORT:8080}
