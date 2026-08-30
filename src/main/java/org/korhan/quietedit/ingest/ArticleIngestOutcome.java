@@ -35,5 +35,12 @@ public enum ArticleIngestOutcome {
      * a refusal -- the link keeps its place in {@link ArticleBudget}'s order and is
      * the first thing the next run reaches for.
      */
-    DEFERRED
+    DEFERRED,
+
+    /**
+     * Never fetched, and never will be: the link failed to produce a document too
+     * many runs in a row. Reported rather than dropped silently, because a feed that
+     * starts abandoning links is a fact about the publisher an operator wants to see.
+     */
+    ABANDONED
 }

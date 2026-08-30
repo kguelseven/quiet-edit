@@ -46,6 +46,16 @@ public record ArticleIngestResult(
                 null, null, 0, "deferred by the run's article budget");
     }
 
+    /**
+     * Also no URL beyond the link: an abandoned candidate is not fetched either. The
+     * strike count is spelled out in the reason because it is the whole justification
+     * for the run declining to try.
+     */
+    static ArticleIngestResult abandoned(String link, int failureCount) {
+        return new ArticleIngestResult(link, null, null, ArticleIngestOutcome.ABANDONED,
+                null, null, 0, "abandoned after " + failureCount + " consecutive failed attempts");
+    }
+
     static ArticleIngestResult failed(String link, String finalUrl, String reason) {
         return new ArticleIngestResult(link, finalUrl, null, ArticleIngestOutcome.FAILED,
                 null, null, 0, reason);

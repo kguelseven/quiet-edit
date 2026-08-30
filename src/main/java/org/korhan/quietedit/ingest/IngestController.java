@@ -67,7 +67,8 @@ public class IngestController {
                             run.count(ArticleIngestOutcome.UNCHANGED),
                             run.count(ArticleIngestOutcome.SKIPPED),
                             run.count(ArticleIngestOutcome.FAILED),
-                            run.count(ArticleIngestOutcome.DEFERRED)),
+                            run.count(ArticleIngestOutcome.DEFERRED),
+                            run.count(ArticleIngestOutcome.ABANDONED)),
                     run.feeds().stream().map(FeedItem::of).toList());
         }
     }
@@ -80,11 +81,12 @@ public class IngestController {
 
     /**
      * {@code checked} is the sum of the outcome counts -- what the run planned for.
-     * {@code deferred} is the part of that plan the run's article budget pushed to
-     * the next run, so {@code checked - deferred} is what was actually fetched.
+     * {@code deferred} and {@code abandoned} are the parts of that plan the run's
+     * article budget did not fetch -- the first to be picked up next run, the second
+     * for good -- so {@code checked - deferred - abandoned} is what was fetched.
      */
     public record ArticleSummary(int checked, long created, long unchanged, long skipped, long failed,
-                                 long deferred) {
+                                 long deferred, long abandoned) {
     }
 
     public record FeedItem(

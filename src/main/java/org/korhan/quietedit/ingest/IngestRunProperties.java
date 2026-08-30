@@ -14,13 +14,21 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * scheduler's fixed delay only starts counting once it finally ends. The default
  * of 50 is a starting point, not a measurement: with a two second host interval it
  * keeps a run in the low minutes even when every article sits on one host.
+ *
+ * <p>{@code maxArticleFailures} is how many consecutive attempts a link may make
+ * without producing a document before the run stops offering it. The reasoning
+ * behind the default of three is in {@link ArticleBudget}.
  */
 @ConfigurationProperties("quietedit.ingest.run")
-public record IngestRunProperties(@DefaultValue("50") int maxArticles) {
+public record IngestRunProperties(@DefaultValue("50") int maxArticles,
+                                  @DefaultValue("3") int maxArticleFailures) {
 
     public IngestRunProperties {
         if (maxArticles < 1) {
             throw new IllegalArgumentException("quietedit.ingest.run.max-articles must be >= 1");
+        }
+        if (maxArticleFailures < 1) {
+            throw new IllegalArgumentException("quietedit.ingest.run.max-article-failures must be >= 1");
         }
     }
 }

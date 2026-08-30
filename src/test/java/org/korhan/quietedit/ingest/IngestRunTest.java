@@ -71,6 +71,9 @@ class IngestRunTest {
     @Autowired
     private DocumentVersionRepository versions;
 
+    @Autowired
+    private ArticleAttemptRepository attempts;
+
     @DynamicPropertySource
     static void ingestProperties(DynamicPropertyRegistry registry) {
         registry.add("test.wiremock.base-url", server::baseUrl);
@@ -95,6 +98,7 @@ class IngestRunTest {
     void reset() {
         server.resetAll();
         documents.deleteAll();
+        attempts.deleteAll();
         feeds.deleteAll();
         server.stubFor(get("/robots.txt").willReturn(aResponse().withStatus(404)));
     }
@@ -234,6 +238,70 @@ class IngestRunTest {
         assertThat(notAFeed.failureReason()).contains("not a feed");
         assertThat(notAFeed.articles()).isEmpty();
         assertThat(run.count(ArticleIngestOutcome.NEW)).isEqualTo(1);
+    }
+
+    /**
+     * Three strikes, end to end: a link that never yields a document is tried three
+     * times and then stops being a candidate, while the real article next to it in the
+     * same feed is fetched by every run throughout.
+     *
+     * <p>The article ceiling is the default here and never in reach, so this is the
+     * abandonment rule on its own -- which is the case that would otherwise re-fetch a
+     * permanently broken link on every single poll forever.
+     */
+    @Test
+    void aLinkThatNeverYieldsADocumentIsAbandonedAfterThreeAttempts() {
+        server.stubFor(get("/broken.xml").willReturn(aResponse().withStatus(500)));
+        server.stubFor(get("/press.xml").willReturn(ok(feedBody("Press", "/verschwunden", "/steuerreform"))));
+        server.stubFor(get("/wire.xml").willReturn(ok(feedBody("Wire"))));
+        server.stubFor(get("/verschwunden").willReturn(aResponse().withStatus(404)));
+        server.stubFor(get("/steuerreform").willReturn(articlePage("Steuerreform beschlossen")));
+
+        for (int run = 1; run <= 3; run++) {
+            IngestRun ingest = ingestService.runOnce();
+
+            assertThat(article(ingest, "/verschwunden").outcome())
+                    .as("attempt %d is still made", run).isEqualTo(ArticleIngestOutcome.FAILED);
+            assertThat(attempts.findById(canonical("/verschwunden")).orElseThrow().getFailureCount())
+                    .isEqualTo(run);
+        }
+
+        IngestRun fourth = ingestService.runOnce();
+
+        ArticleIngestResult abandoned = article(fourth, "/verschwunden");
+        assertThat(abandoned.outcome()).isEqualTo(ArticleIngestOutcome.ABANDONED);
+        assertThat(abandoned.reason()).contains("3 consecutive failed attempts");
+        assertThat(fourth.count(ArticleIngestOutcome.ABANDONED)).isEqualTo(1);
+        // Never asked for a fifth time, and the strike count does not keep growing.
+        server.verify(3, getRequestedFor(urlEqualTo("/verschwunden")));
+        assertThat(attempts.findById(canonical("/verschwunden")).orElseThrow().getFailureCount()).isEqualTo(3);
+
+        // The article behind it was reached by every one of the four runs.
+        assertThat(fourth.count(ArticleIngestOutcome.UNCHANGED)).isEqualTo(1);
+        server.verify(4, getRequestedFor(urlEqualTo("/steuerreform")));
+        ArticleAttempt succeeded = attempts.findById(canonical("/steuerreform")).orElseThrow();
+        assertThat(succeeded.getFailureCount()).isZero();
+        assertThat(succeeded.getLastAttemptAt()).isNotNull();
+    }
+
+    /**
+     * A refusal is a failure for the purposes of giving up: robots.txt saying no is
+     * correct behaviour, but the link still produces nothing, so it must not keep the
+     * front of the queue on that account.
+     */
+    @Test
+    void aRobotsRefusalCountsAsAFailedAttempt() {
+        server.resetAll();
+        server.stubFor(get("/robots.txt").willReturn(okForContentType("text/plain",
+                "User-agent: quietedit\nDisallow: /steuerreform\n")));
+        server.stubFor(get("/broken.xml").willReturn(aResponse().withStatus(500)));
+        server.stubFor(get("/press.xml").willReturn(ok(feedBody("Press", "/steuerreform"))));
+        server.stubFor(get("/wire.xml").willReturn(ok(feedBody("Wire"))));
+
+        IngestRun run = ingestService.runOnce();
+
+        assertThat(run.count(ArticleIngestOutcome.SKIPPED)).isEqualTo(1);
+        assertThat(attempts.findById(canonical("/steuerreform")).orElseThrow().getFailureCount()).isEqualTo(1);
     }
 
     /** The endpoint is the same run, so it only has to agree with it. */

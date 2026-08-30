@@ -78,6 +78,9 @@ class IngestRunGuardTest {
     @Autowired
     private DocumentRepository documents;
 
+    @Autowired
+    private ArticleAttemptRepository attempts;
+
     @DynamicPropertySource
     static void ingestProperties(DynamicPropertyRegistry registry) {
         registry.add("test.wiremock.base-url", server::baseUrl);
@@ -101,6 +104,9 @@ class IngestRunGuardTest {
     void reset() {
         server.resetAll();
         documents.deleteAll();
+        // Cleared with the documents: a leftover attempt row would rank this test's
+        // candidates by what the previous test tried, not by what this one did.
+        attempts.deleteAll();
         feeds.deleteAll();
         server.stubFor(get("/robots.txt").willReturn(aResponse().withStatus(404)));
     }
