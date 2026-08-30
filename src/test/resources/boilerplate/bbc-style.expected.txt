@@ -1,0 +1,7 @@
+TITLE	Rail operator fined over cancelled night services
+PARA	The regulator has fined Northline Rail £4.2m for cancelling scheduled night services on 41 occasions without giving passengers the required notice.
+PARA	Its report found that the operator had removed the trains from its live timetable feed less than an hour before departure, so that stations displayed them as running until shortly before midnight.
+PARA	What the regulator found
+PARA	Investigators described the practice as systematic rather than accidental, pointing to an internal instruction that told controllers to delay publication of cancellations until crew rosters were confirmed.
+PARA	Northline said it accepted the findings in full and had changed the instruction in June.
+PARA	The fine will be paid into the passenger compensation fund.
