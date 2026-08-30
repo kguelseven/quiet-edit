@@ -21,6 +21,7 @@
         <java.version>25</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <jsoup.version>1.21.2</jsoup.version>
+        <wiremock.version>3.13.1</wiremock.version>
     </properties>
 
     <dependencies>
@@ -73,6 +74,14 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Standalone (shaded) build on purpose: the plain artifact drags its own
+             Jetty onto the test classpath next to the starter's Tomcat. -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <version>${wiremock.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
