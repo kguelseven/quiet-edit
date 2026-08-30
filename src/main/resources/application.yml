@@ -25,6 +25,11 @@ spring:
 
 quietedit:
   ingest:
+    schedule:
+      # The timer only calls runOnce(); the same run is reachable via POST /api/ingest/run.
+      enabled: ${QUIETEDIT_SCHEDULE_ENABLED:true}
+      # Fixed delay, measured from the end of the previous run.
+      interval: ${QUIETEDIT_SCHEDULE_INTERVAL:15m}
     catalog:
       location: ${QUIETEDIT_FEEDS_FILE:file:./feeds.yaml}
     fetch:
