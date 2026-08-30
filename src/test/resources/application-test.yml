@@ -1,0 +1,23 @@
+# Test profile. The datasource is supplied at runtime by Testcontainers via
+# @ServiceConnection, so no URL/credentials are configured here -- that keeps
+# tests from ever reaching the docker-compose container.
+spring:
+  datasource:
+    # Deliberately unreachable: if @ServiceConnection is ever missing, the test
+    # must fail loudly instead of silently using the docker-compose database.
+    url: jdbc:postgresql://testcontainers-required.invalid:1/none
+    username: none
+    password: none
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    clean-disabled: false
+
+logging:
+  level:
+    org.flywaydb: INFO
