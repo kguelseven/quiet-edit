@@ -14,7 +14,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.SequencedSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
@@ -22,6 +21,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
 /**
@@ -62,6 +62,9 @@ import java.util.stream.Collectors;
  * <p>A run is also bounded: {@link ArticleBudget} caps how many articles it may
  * fetch and decides which candidates get that budget. Everything above the cap is
  * reported as {@link ArticleIngestOutcome#DEFERRED} and picked up by the next run.
+ * Every attempt is written back to {@link ArticleAttemptLog}, which is what lets the
+ * budget rank by "last tried" rather than by "last succeeded" and eventually stop
+ * offering a link that never works.
  *
  * <p>Articles are fetched on virtual threads, and the fan-out covers <em>all</em>
  * feeds' links at once rather than one feed at a time: {@link HostRateLimiter}
@@ -83,6 +86,7 @@ public class IngestService {
     private final RawHtmlStore rawHtml;
     private final UrlCanonicalizer canonicalizer;
     private final DocumentRegistry documents;
+    private final ArticleAttemptLog attemptLog;
     private final Clock clock;
     private final ArticleBudget budget;
 
@@ -92,7 +96,7 @@ public class IngestService {
     public IngestService(FeedFetchService feedFetchService, FeedParser feedParser,
                          ArticleFetcher articleFetcher, ArticleExtractor articleExtractor,
                          RawHtmlStore rawHtml, UrlCanonicalizer canonicalizer,
-                         DocumentRegistry documents, Clock clock,
+                         DocumentRegistry documents, ArticleAttemptLog attemptLog, Clock clock,
                          IngestRunProperties properties) {
         this.feedFetchService = feedFetchService;
         this.feedParser = feedParser;
@@ -101,8 +105,9 @@ public class IngestService {
         this.rawHtml = rawHtml;
         this.canonicalizer = canonicalizer;
         this.documents = documents;
+        this.attemptLog = attemptLog;
         this.clock = clock;
-        this.budget = new ArticleBudget(properties.maxArticles());
+        this.budget = new ArticleBudget(properties.maxArticles(), properties.maxArticleFailures());
     }
 
     /**
@@ -127,51 +132,86 @@ public class IngestService {
         List<FeedWork> work = feedRun.results().stream().map(fetch -> plan(fetch, seenLinks)).toList();
         List<Candidate> candidates = work.stream().flatMap(feed -> feed.candidates.stream()).toList();
         for (Attempt attempt : fetchAll(admit(candidates))) {
-            attempt.candidate().work().articles[attempt.candidate().slot()] = resolve(attempt);
+            Candidate candidate = attempt.candidate();
+            ArticleIngestResult result = resolve(attempt);
+            candidate.work().articles[candidate.slot()] = result;
+            recordAttempt(candidate, result);
         }
 
         IngestRun run = new IngestRun(startedAt, clock.instant(), feedRun.catalog(),
                 work.stream().map(FeedWork::toResult).toList());
         log.info("Ingest run finished in {}: feeds {} fetched / {} unchanged / {} failed; "
-                        + "articles {} planned, {} new, {} unchanged, {} skipped, {} failed, {} deferred",
+                        + "articles {} planned, {} new, {} unchanged, {} skipped, {} failed, "
+                        + "{} deferred, {} abandoned",
                 run.duration(),
                 run.feedCount(FeedFetchOutcome.FETCHED), run.feedCount(FeedFetchOutcome.NOT_MODIFIED),
                 run.feedCount(FeedFetchOutcome.FAILED),
                 run.checked(), run.count(ArticleIngestOutcome.NEW), run.count(ArticleIngestOutcome.UNCHANGED),
                 run.count(ArticleIngestOutcome.SKIPPED), run.count(ArticleIngestOutcome.FAILED),
-                run.count(ArticleIngestOutcome.DEFERRED));
+                run.count(ArticleIngestOutcome.DEFERRED), run.count(ArticleIngestOutcome.ABANDONED));
         return run;
     }
 
     /**
-     * Applies the run's ceiling, marking everything above it as deferred.
+     * Applies the run's ceiling and its give-up rule, deciding every candidate the
+     * run will not fetch.
      *
-     * <p>The store is only consulted once the ceiling is actually in reach: a run
-     * that fits needs no ranking, and asking anyway would put a query in front of
-     * every poll for no decision.
+     * <p>The attempt log is consulted even when the run fits inside its ceiling.
+     * Ranking would indeed be pointless then, but abandonment is not: a catalogue
+     * small enough to fit would otherwise re-fetch a permanently broken link on every
+     * single poll, which is the cost this rule exists to stop.
      */
     private List<Candidate> admit(List<Candidate> candidates) {
-        if (candidates.size() <= budget.maxArticles()) {
+        if (candidates.isEmpty()) {
             return candidates;
         }
-        List<String> identities = candidates.stream().map(this::provisionalIdentity).toList();
-        Map<String, Instant> checked = documents.lastCheckedAt(
-                identities.stream().filter(Objects::nonNull).collect(Collectors.toSet()));
-        SequencedSet<Integer> admitted = budget.admit(
-                identities.stream().map(identity -> identity == null ? null : checked.get(identity)).toList());
+        Map<String, AttemptHistory> history = attemptLog.historyOf(
+                candidates.stream().map(Candidate::identity).collect(Collectors.toSet()));
+        ArticleBudget.Selection selection = budget.admit(
+                candidates.stream().map(candidate -> history.get(candidate.identity())).toList());
 
-        List<Candidate> selected = new ArrayList<>(admitted.size());
+        List<Candidate> selected = new ArrayList<>(selection.admitted().size());
         for (int position = 0; position < candidates.size(); position++) {
             Candidate candidate = candidates.get(position);
-            if (admitted.contains(position)) {
+            if (selection.admitted().contains(position)) {
                 selected.add(candidate);
+            } else if (selection.abandoned().contains(position)) {
+                candidate.work().articles[candidate.slot()] = ArticleIngestResult.abandoned(
+                        candidate.link(), history.get(candidate.identity()).failureCount());
             } else {
                 candidate.work().articles[candidate.slot()] = ArticleIngestResult.deferred(candidate.link());
             }
         }
-        log.warn("Article budget of {} reached: {} of {} candidates deferred to the next run",
-                budget.maxArticles(), candidates.size() - selected.size(), candidates.size());
+        if (!selection.abandoned().isEmpty()) {
+            log.warn("{} of {} candidates were abandoned after {} consecutive failed attempts",
+                    selection.abandoned().size(), candidates.size(), budget.maxFailures());
+        }
+        int deferred = candidates.size() - selected.size() - selection.abandoned().size();
+        if (deferred > 0) {
+            log.warn("Article budget of {} reached: {} of {} candidates deferred to the next run",
+                    budget.maxArticles(), deferred, candidates.size());
+        }
         return selected;
+    }
+
+    /**
+     * Writes back that this link was tried and whether the try produced a document,
+     * which is what moves it out of the front of the next run's queue and, after
+     * enough consecutive failures, out of the candidate set entirely.
+     *
+     * <p>A document id is the success test rather than the outcome enum: it is the
+     * one thing that means "this link resolved to an article", however the run chose
+     * to label it.
+     *
+     * <p>Contained like every other per-article step. A log that cannot be written is
+     * a lost strike, not a lost article.
+     */
+    private void recordAttempt(Candidate candidate, ArticleIngestResult result) {
+        try {
+            attemptLog.record(candidate.identity(), clock.instant(), result.documentId() != null);
+        } catch (RuntimeException e) {
+            log.error("Could not record the attempt on {}", candidate.identity(), e);
+        }
     }
 
     /**
@@ -179,15 +219,20 @@ public class IngestService {
      * {@code rel=canonical} of its own. Good enough to rank by -- a link whose real
      * identity differs is at worst ranked as unseen, which only costs it a place at
      * the front of the queue -- and it is the only identity available before the
-     * fetch, which is the whole point of ranking here. An unusable link is left
-     * unranked and fetched, so that the fetch stage is the one that reports it
-     * broken.
+     * fetch, which is the whole point of ranking here.
+     *
+     * <p>A link that cannot be canonicalised at all falls back to the raw link as its
+     * own identity rather than staying unidentified. It is still fetched, so that the
+     * fetch stage is the one that reports it broken, but it now accumulates strikes
+     * like any other failing link -- an untracked link would rank as never-tried
+     * forever and starve the catalogue behind it, which is precisely the failure this
+     * whole mechanism exists to prevent.
      */
-    private String provisionalIdentity(Candidate candidate) {
+    private String provisionalIdentity(String link) {
         try {
-            return canonicalizer.canonicalize(candidate.link());
+            return canonicalizer.canonicalize(link);
         } catch (RuntimeException e) {
-            return null;
+            return link;
         }
     }
 
@@ -214,7 +259,7 @@ public class IngestService {
         if (!parse.skipped().isEmpty()) {
             log.info("Feed {}: {} entries skipped by the parser", fetch.url(), parse.skipped().size());
         }
-        return FeedWork.parsed(fetch, parse, seenLinks);
+        return FeedWork.parsed(fetch, parse, seenLinks, this::provisionalIdentity);
     }
 
     private List<Attempt> fetchAll(List<Candidate> candidates) {
@@ -335,12 +380,13 @@ public class IngestService {
          * fetch would additionally race the first for its creation. Which feed wins
          * a shared link is decided by feed order, which is itself stable.
          */
-        static FeedWork parsed(FeedFetchResult fetch, FeedParseResult parse, Set<String> seenLinks) {
+        static FeedWork parsed(FeedFetchResult fetch, FeedParseResult parse, Set<String> seenLinks,
+                               UnaryOperator<String> identity) {
             FeedWork work = new FeedWork(fetch, parse, null, parse.entries().size());
             for (int slot = 0; slot < parse.entries().size(); slot++) {
                 String link = parse.entries().get(slot).link().trim();
                 if (seenLinks.add(link)) {
-                    work.candidates.add(new Candidate(work, slot, fetch.feedId(), link));
+                    work.candidates.add(new Candidate(work, slot, fetch.feedId(), link, identity.apply(link)));
                 } else {
                     work.articles[slot] = ArticleIngestResult.skipped(link, null, "duplicate link in this run");
                 }
@@ -357,7 +403,11 @@ public class IngestService {
         }
     }
 
-    private record Candidate(FeedWork work, int slot, UUID feedId, String link) {
+    /**
+     * @param identity what the budget and the attempt log key this link by, resolved
+     *                 before the fetch because the ranking happens before the fetch
+     */
+    private record Candidate(FeedWork work, int slot, UUID feedId, String link, String identity) {
     }
 
     /**
