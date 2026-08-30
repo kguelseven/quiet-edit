@@ -21,6 +21,10 @@ import java.util.UUID;
  * <p>Synchronous on purpose: a run over a real catalogue takes minutes, which makes
  * this a operator's endpoint rather than a public one. Turning it into a job with a
  * status resource is a decision the API ticket owns, not this one.
+ *
+ * <p>A trigger that collides with a run already in flight is refused by the service
+ * and rendered as Problem Details by {@link IngestExceptionHandler}; no branch for
+ * it exists here, because the endpoint holds no decision of its own.
  */
 @RestController
 @RequestMapping("/api/ingest")
@@ -62,7 +66,8 @@ public class IngestController {
                             run.count(ArticleIngestOutcome.NEW),
                             run.count(ArticleIngestOutcome.UNCHANGED),
                             run.count(ArticleIngestOutcome.SKIPPED),
-                            run.count(ArticleIngestOutcome.FAILED)),
+                            run.count(ArticleIngestOutcome.FAILED),
+                            run.count(ArticleIngestOutcome.DEFERRED)),
                     run.feeds().stream().map(FeedItem::of).toList());
         }
     }
@@ -73,8 +78,13 @@ public class IngestController {
     public record FeedSummary(int polled, long fetched, long notModified, long failed) {
     }
 
-    /** The ticket's four counts. {@code checked} is their sum. */
-    public record ArticleSummary(int checked, long created, long unchanged, long skipped, long failed) {
+    /**
+     * {@code checked} is the sum of the outcome counts -- what the run planned for.
+     * {@code deferred} is the part of that plan the run's article budget pushed to
+     * the next run, so {@code checked - deferred} is what was actually fetched.
+     */
+    public record ArticleSummary(int checked, long created, long unchanged, long skipped, long failed,
+                                 long deferred) {
     }
 
     public record FeedItem(

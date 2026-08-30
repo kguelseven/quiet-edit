@@ -1,8 +1,8 @@
 package org.korhan.quietedit.ingest;
 
 /**
- * How one article link ended in a run. Exactly one outcome per checked link, so
- * the four counts add up to the number of links a run looked at.
+ * How one article link ended in a run. Exactly one outcome per link the run
+ * planned for, so the counts add up to the number of links it planned for.
  *
  * <p>{@link #NEW} and {@link #UNCHANGED} are statements about <em>identity</em>,
  * not about content: this ticket's boundary stops before versioning, so a run can
@@ -28,5 +28,12 @@ public enum ArticleIngestOutcome {
     SKIPPED,
 
     /** The fetch failed, the URL was unusable, or the stored HTML could not be read back. */
-    FAILED
+    FAILED,
+
+    /**
+     * Never fetched: the run had reached its article ceiling. Not a failure and not
+     * a refusal -- the link keeps its place in {@link ArticleBudget}'s order and is
+     * the first thing the next run reaches for.
+     */
+    DEFERRED
 }

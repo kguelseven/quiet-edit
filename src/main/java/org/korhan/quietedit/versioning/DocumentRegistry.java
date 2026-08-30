@@ -4,6 +4,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -46,6 +50,32 @@ public class DocumentRegistry {
         }
         Document document = documents.save(new Document(canonicalUrl, feedId, observedAt, observedAt));
         return new Registration(document.getId(), true);
+    }
+
+    /**
+     * When each of these canonical URLs was last checked, for the URLs a document
+     * exists for. A caller that finds no entry is looking at an article this system
+     * has never resolved to a document.
+     *
+     * <p>One query rather than a lookup per URL: the caller is the ingest run's
+     * budget, which has to rank every candidate of a run before it fetches any of
+     * them, and a per-candidate round trip would put hundreds of them in front of
+     * the first fetch.
+     *
+     * @return a map from canonical URL to {@code lastCheckedAt}, never containing
+     *         nulls, and smaller than the input wherever a document is unknown
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Instant> lastCheckedAt(Collection<String> canonicalUrls) {
+        if (canonicalUrls.isEmpty()) {
+            return Map.of();
+        }
+        List<Document> known = documents.findByCanonicalUrlIn(canonicalUrls);
+        Map<String, Instant> checked = new HashMap<>(known.size());
+        for (Document document : known) {
+            checked.put(document.getCanonicalUrl(), document.getLastCheckedAt());
+        }
+        return checked;
     }
 
     /** @param created true when this observation is the first one of that document */

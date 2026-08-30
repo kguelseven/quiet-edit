@@ -33,7 +33,11 @@ public record IngestRun(
         return feeds.stream().flatMap(feed -> feed.articles().stream()).toList();
     }
 
-    /** Article links the run looked at; the four outcome counts add up to this. */
+    /**
+     * Article links the run planned for; the outcome counts add up to this. Not the
+     * same as the number of links it fetched -- {@link ArticleIngestOutcome#DEFERRED}
+     * ones were left for the next run.
+     */
     public int checked() {
         return articles().size();
     }

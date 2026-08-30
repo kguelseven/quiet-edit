@@ -12,13 +12,17 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.SequencedSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /**
  * The whole path from outside to inside, in one synchronous call: sync the feed
@@ -45,6 +49,20 @@ import java.util.concurrent.Future;
  * on remote servers, and a transaction spanning it would pin a connection for the
  * whole poll. Writes happen in short transactions per feed row and per document.
  *
+ * <p>One run at a time. The scheduler cannot overlap itself, but {@code POST
+ * /api/ingest/run} can fire into a scheduled run and two operators can trigger it
+ * together; both runs would then fetch the same articles and race each other on the
+ * unique constraint of {@code document.canonical_url}, which the loser would report
+ * as a failed article rather than as the duplicate it is. A second attempt is
+ * therefore refused outright rather than queued: a queued run would only repeat
+ * work that the run in flight is already doing. The guard is one process's -- a
+ * second instance of the application would need a lock in the database, which is a
+ * decision for the day this is deployed more than once.
+ *
+ * <p>A run is also bounded: {@link ArticleBudget} caps how many articles it may
+ * fetch and decides which candidates get that budget. Everything above the cap is
+ * reported as {@link ArticleIngestOutcome#DEFERRED} and picked up by the next run.
+ *
  * <p>Articles are fetched on virtual threads, and the fan-out covers <em>all</em>
  * feeds' links at once rather than one feed at a time: {@link HostRateLimiter}
  * already serialises per host, so a wide fan-out only ever parallelises across
@@ -66,11 +84,16 @@ public class IngestService {
     private final UrlCanonicalizer canonicalizer;
     private final DocumentRegistry documents;
     private final Clock clock;
+    private final ArticleBudget budget;
+
+    /** False between runs. The single permit that keeps two runs from overlapping. */
+    private final AtomicBoolean running = new AtomicBoolean();
 
     public IngestService(FeedFetchService feedFetchService, FeedParser feedParser,
                          ArticleFetcher articleFetcher, ArticleExtractor articleExtractor,
                          RawHtmlStore rawHtml, UrlCanonicalizer canonicalizer,
-                         DocumentRegistry documents, Clock clock) {
+                         DocumentRegistry documents, Clock clock,
+                         IngestRunProperties properties) {
         this.feedFetchService = feedFetchService;
         this.feedParser = feedParser;
         this.articleFetcher = articleFetcher;
@@ -79,29 +102,93 @@ public class IngestService {
         this.canonicalizer = canonicalizer;
         this.documents = documents;
         this.clock = clock;
+        this.budget = new ArticleBudget(properties.maxArticles());
     }
 
+    /**
+     * @throws IngestAlreadyRunningException if a run is already in flight
+     */
     public IngestRun runOnce() {
+        if (!running.compareAndSet(false, true)) {
+            throw new IngestAlreadyRunningException();
+        }
+        try {
+            return run();
+        } finally {
+            running.set(false);
+        }
+    }
+
+    private IngestRun run() {
         Instant startedAt = clock.instant();
         FeedFetchRun feedRun = feedFetchService.runOnce();
 
         Set<String> seenLinks = new LinkedHashSet<>();
         List<FeedWork> work = feedRun.results().stream().map(fetch -> plan(fetch, seenLinks)).toList();
         List<Candidate> candidates = work.stream().flatMap(feed -> feed.candidates.stream()).toList();
-        for (Attempt attempt : fetchAll(candidates)) {
+        for (Attempt attempt : fetchAll(admit(candidates))) {
             attempt.candidate().work().articles[attempt.candidate().slot()] = resolve(attempt);
         }
 
         IngestRun run = new IngestRun(startedAt, clock.instant(), feedRun.catalog(),
                 work.stream().map(FeedWork::toResult).toList());
         log.info("Ingest run finished in {}: feeds {} fetched / {} unchanged / {} failed; "
-                        + "articles {} checked, {} new, {} unchanged, {} skipped, {} failed",
+                        + "articles {} planned, {} new, {} unchanged, {} skipped, {} failed, {} deferred",
                 run.duration(),
                 run.feedCount(FeedFetchOutcome.FETCHED), run.feedCount(FeedFetchOutcome.NOT_MODIFIED),
                 run.feedCount(FeedFetchOutcome.FAILED),
                 run.checked(), run.count(ArticleIngestOutcome.NEW), run.count(ArticleIngestOutcome.UNCHANGED),
-                run.count(ArticleIngestOutcome.SKIPPED), run.count(ArticleIngestOutcome.FAILED));
+                run.count(ArticleIngestOutcome.SKIPPED), run.count(ArticleIngestOutcome.FAILED),
+                run.count(ArticleIngestOutcome.DEFERRED));
         return run;
+    }
+
+    /**
+     * Applies the run's ceiling, marking everything above it as deferred.
+     *
+     * <p>The store is only consulted once the ceiling is actually in reach: a run
+     * that fits needs no ranking, and asking anyway would put a query in front of
+     * every poll for no decision.
+     */
+    private List<Candidate> admit(List<Candidate> candidates) {
+        if (candidates.size() <= budget.maxArticles()) {
+            return candidates;
+        }
+        List<String> identities = candidates.stream().map(this::provisionalIdentity).toList();
+        Map<String, Instant> checked = documents.lastCheckedAt(
+                identities.stream().filter(Objects::nonNull).collect(Collectors.toSet()));
+        SequencedSet<Integer> admitted = budget.admit(
+                identities.stream().map(identity -> identity == null ? null : checked.get(identity)).toList());
+
+        List<Candidate> selected = new ArrayList<>(admitted.size());
+        for (int position = 0; position < candidates.size(); position++) {
+            Candidate candidate = candidates.get(position);
+            if (admitted.contains(position)) {
+                selected.add(candidate);
+            } else {
+                candidate.work().articles[candidate.slot()] = ArticleIngestResult.deferred(candidate.link());
+            }
+        }
+        log.warn("Article budget of {} reached: {} of {} candidates deferred to the next run",
+                budget.maxArticles(), candidates.size() - selected.size(), candidates.size());
+        return selected;
+    }
+
+    /**
+     * The identity a link would have if it resolved without redirects and without a
+     * {@code rel=canonical} of its own. Good enough to rank by -- a link whose real
+     * identity differs is at worst ranked as unseen, which only costs it a place at
+     * the front of the queue -- and it is the only identity available before the
+     * fetch, which is the whole point of ranking here. An unusable link is left
+     * unranked and fetched, so that the fetch stage is the one that reports it
+     * broken.
+     */
+    private String provisionalIdentity(Candidate candidate) {
+        try {
+            return canonicalizer.canonicalize(candidate.link());
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /**

@@ -30,6 +30,10 @@ quietedit:
       enabled: ${QUIETEDIT_SCHEDULE_ENABLED:true}
       # Fixed delay, measured from the end of the previous run.
       interval: ${QUIETEDIT_SCHEDULE_INTERVAL:15m}
+    run:
+      # Ceiling on the articles one run may fetch. Nothing above it is lost: the
+      # next run takes the least recently fetched candidates first.
+      max-articles: ${QUIETEDIT_MAX_ARTICLES_PER_RUN:50}
     catalog:
       location: ${QUIETEDIT_FEEDS_FILE:file:./feeds.yaml}
     fetch:
