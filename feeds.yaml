@@ -1,0 +1,30 @@
+feeds:
+  # --- Schweiz ---
+  - url: "https://www.srf.ch/news/bnf/rss/1646"
+    name: "SRF News"
+  - url: "https://www.nzz.ch/recent.rss"
+    name: "NZZ"
+  - url: "https://www.watson.ch/api/1.0/rss.xml"
+    name: "Watson"
+  - url: "https://partner-feeds.beta.20min.ch/rss/20minuten"
+    name: "20 Minuten"
+
+  # --- Deutschland ---
+  - url: "https://www.tagesschau.de/infoservices/alle-meldungen-100~rss2.xml"
+    name: "Tagesschau"
+  - url: "https://www.spiegel.de/schlagzeilen/tops/index.rss"
+    name: "Spiegel"
+  - url: "https://newsfeed.zeit.de/index"
+    name: "Zeit Online"
+  - url: "https://www.faz.net/rss/aktuell/"
+    name: "FAZ"
+  - url: "https://rss.sueddeutsche.de/rss/Topthemen"
+    name: "Süddeutsche"
+  - url: "https://www.heise.de/rss/heise-atom.xml"
+    name: "heise online"
+
+  # --- Österreich ---
+  - url: "https://rss.orf.at/news.xml"
+    name: "ORF"
+  - url: "https://www.derstandard.at/rss"
+    name: "Der Standard"

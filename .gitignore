@@ -1,0 +1,19 @@
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/
+
+target/
+!.mvn/wrapper/maven-wrapper.jar
+*.log
+
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# Local overrides
+.env
