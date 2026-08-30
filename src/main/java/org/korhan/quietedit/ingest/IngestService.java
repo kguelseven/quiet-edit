@@ -247,7 +247,8 @@ public class IngestService {
         }
         FeedParseResult parse;
         try {
-            parse = feedParser.parse(fetch.url(), ResponseText.decode(fetch.body(), fetch.contentType()));
+            String body = EncodingResolver.decode(fetch.body(), fetch.contentType(), fetch.url());
+            parse = feedParser.parse(fetch.url(), body);
         } catch (RuntimeException e) {
             log.error("Unexpected failure while parsing {}", fetch.url(), e);
             return FeedWork.withoutEntries(fetch, "unexpected: " + e.getClass().getSimpleName());
@@ -309,7 +310,7 @@ public class IngestService {
     private Attempt read(Candidate candidate, ArticleFetchResult fetch) {
         String html;
         try {
-            html = ResponseText.decode(rawHtml.read(fetch.rawHtmlRef()), fetch.contentType());
+            html = EncodingResolver.decode(rawHtml.read(fetch.rawHtmlRef()), fetch.contentType(), fetch.finalUrl());
         } catch (RuntimeException e) {
             return Attempt.decided(candidate, ArticleIngestResult.failed(
                     candidate.link(), fetch.finalUrl(), "raw html unreadable: " + e.getMessage()));
