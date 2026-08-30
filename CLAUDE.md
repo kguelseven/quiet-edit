@@ -56,7 +56,7 @@ One session handles exactly **one ticket**.
 2. `bd ready -t task` — take the top ticket. Do not invent your own ordering. Epics are containers, never work items; do not claim one.
 3. `bd update <id> --claim`, then read `bd show <id>` in full — especially the acceptance criteria, the scope boundary and the Flyway line
 4. Implement, including tests
-5. Work discovered along the way that does not belong to this ticket becomes its own ticket: `bd create "..." --deps discovered-from:<id>` Do not silently fix it. Do not ignore it either.
+5. Work discovered along the way that does not belong to this ticket becomes its own ticket: `bd create "..." --deps discovered-from:<id>` and attach it to the same epic as the ticket you are working on. Do not silently fix it. Do not ignore it either.   
 6. `mvn verify`
 7. `bd close <id> --reason "..."` — what was built, which decision was made, what remains open. "Done" is not a usable reason.
 8. Create branch `feat/<id>`, commit there, push the branch and open a PR with `gh pr create`. Committing, pushing a feature branch and opening a PR are explicitly authorised by this protocol. **Never push to main. Never merge.**
