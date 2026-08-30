@@ -5,10 +5,11 @@ Detects silent edits to news articles: ingest RSS feeds, fetch full text, versio
 ## Stack
 
 - Java 25, Spring Boot 4.1.1, Maven 3.9.12, PostgreSQL 18.6, Spring Data JPA / Hibernate / Flyway (comes from the Spring Boot BOM). 
-- Tests: JUnit 5, Testcontainers, WireMock, AssertJ.
+- Tests: JUnit 5, Testcontainers 2.0.5, WireMock, AssertJ.
 - Libraries: rome (feeds), jsoup (HTML parsing), java-diff-utils (diffing).
 - No further dependencies unless named in the ticket.
 - Pin exact versions in the parent POM; do not upgrade them inside a ticket.
+
 
 ## Architecture
 - Package root: org.korhan
