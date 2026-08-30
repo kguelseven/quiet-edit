@@ -20,6 +20,7 @@
     <properties>
         <java.version>25</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <jsoup.version>1.21.2</jsoup.version>
     </properties>
 
     <dependencies>
@@ -42,6 +43,11 @@
         <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>${jsoup.version}</version>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>
