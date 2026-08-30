@@ -21,6 +21,7 @@
         <java.version>25</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <jsoup.version>1.21.2</jsoup.version>
+        <rome.version>2.1.0</rome.version>
         <wiremock.version>3.13.1</wiremock.version>
     </properties>
 
@@ -44,6 +45,11 @@
         <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.rometools</groupId>
+            <artifactId>rome</artifactId>
+            <version>${rome.version}</version>
         </dependency>
         <dependency>
             <groupId>org.jsoup</groupId>

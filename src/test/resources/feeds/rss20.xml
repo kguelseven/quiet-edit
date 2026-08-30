@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/"
+     xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Example Nachrichten - Politik</title>
+    <link>https://example-news.test/politik</link>
+    <description>Aktuelle Meldungen aus der Politik</description>
+    <language>de-DE</language>
+    <lastBuildDate>Tue, 18 Aug 2026 09:02:11 +0200</lastBuildDate>
+    <atom:link href="https://example-news.test/politik/rss.xml" rel="self" type="application/rss+xml"/>
+    <item>
+      <title>Bundestag beschliesst Reform der Netzentgelte</title>
+      <link>https://example-news.test/politik/netzentgelte-reform-a-8812394.html</link>
+      <description>&lt;p&gt;Die Abgeordneten stimmten am Montagabend mit 412 zu 189 Stimmen zu. Die Neuregelung tritt zum 1. Januar in Kraft.&lt;/p&gt;</description>
+      <pubDate>Tue, 18 Aug 2026 07:14:00 +0200</pubDate>
+      <guid isPermaLink="false">example-news-8812394</guid>
+      <dc:creator>Miriam Sandberg</dc:creator>
+      <category>Politik</category>
+    </item>
+    <item>
+      <title>Kommission legt Zeitplan fuer Vergabeverfahren vor</title>
+      <link>https://example-news.test/politik/vergabeverfahren-zeitplan-a-8812301.html?utm_source=rss&amp;utm_medium=feed</link>
+      <description>Der Zeitplan sieht drei Runden vor. Kritik kommt von den Laendern.</description>
+      <pubDate>Mon, 17 Aug 2026 22:41:37 GMT</pubDate>
+      <guid isPermaLink="false">example-news-8812301</guid>
+    </item>
+    <item>
+      <title>Liveblog: Haushaltsdebatte</title>
+      <link>https://example-news.test/politik/liveblog-haushalt-a-8811877.html</link>
+      <description></description>
+      <dc:date>2026-08-17T18:05:00+02:00</dc:date>
+      <guid isPermaLink="true">https://example-news.test/politik/liveblog-haushalt-a-8811877.html</guid>
+    </item>
+  </channel>
+</rss>

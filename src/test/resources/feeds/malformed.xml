@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Truncated Feed</title>
+    <link>https://broken.example.test/rss.xml</link>
+    <item>
+      <title>This item never closes
+      <link>https://broken.example.test/a-1.html</link>
+      <pubDate>Tue, 18 Aug 2026 07:14:00 +0200</pubDate>
