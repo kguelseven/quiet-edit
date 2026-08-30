@@ -1,5 +1,7 @@
 package org.korhan.quietedit.ingest;
 
+import org.korhan.quietedit.versioning.EncodingVerdict;
+
 import java.util.UUID;
 
 /**
@@ -14,6 +16,12 @@ import java.util.UUID;
  * <p>{@code paragraphs} is a count, not the prose: a run's result object is a
  * report, and reports that carry article bodies cannot be logged or returned over
  * REST. The text itself is reachable through {@code rawHtmlRef}.
+ *
+ * <p>{@code encoding} is how the markup was decoded, and it is null for every
+ * outcome that never got a body -- deferred, abandoned, blocked, failed before the
+ * response. Carried here rather than left in a log line because it is the only place
+ * the verdict can reach the version store from: whoever writes a version reads this
+ * result, and mojibake that arrives unlabelled is indistinguishable from prose.
  */
 public record ArticleIngestResult(
         String link,
@@ -23,18 +31,20 @@ public record ArticleIngestResult(
         UUID documentId,
         String rawHtmlRef,
         int paragraphs,
+        EncodingVerdict encoding,
         String reason) {
 
     static ArticleIngestResult ingested(String link, String finalUrl, String canonicalUrl, boolean created,
-                                        UUID documentId, String rawHtmlRef, int paragraphs) {
+                                        UUID documentId, String rawHtmlRef, int paragraphs,
+                                        EncodingVerdict encoding) {
         return new ArticleIngestResult(link, finalUrl, canonicalUrl,
                 created ? ArticleIngestOutcome.NEW : ArticleIngestOutcome.UNCHANGED,
-                documentId, rawHtmlRef, paragraphs, null);
+                documentId, rawHtmlRef, paragraphs, encoding, null);
     }
 
     static ArticleIngestResult skipped(String link, String finalUrl, String reason) {
         return new ArticleIngestResult(link, finalUrl, null, ArticleIngestOutcome.SKIPPED,
-                null, null, 0, reason);
+                null, null, 0, null, reason);
     }
 
     /**
@@ -43,7 +53,7 @@ public record ArticleIngestResult(
      */
     static ArticleIngestResult deferred(String link) {
         return new ArticleIngestResult(link, null, null, ArticleIngestOutcome.DEFERRED,
-                null, null, 0, "deferred by the run's article budget");
+                null, null, 0, null, "deferred by the run's article budget");
     }
 
     /**
@@ -53,11 +63,11 @@ public record ArticleIngestResult(
      */
     static ArticleIngestResult abandoned(String link, int failureCount) {
         return new ArticleIngestResult(link, null, null, ArticleIngestOutcome.ABANDONED,
-                null, null, 0, "abandoned after " + failureCount + " consecutive failed attempts");
+                null, null, 0, null, "abandoned after " + failureCount + " consecutive failed attempts");
     }
 
     static ArticleIngestResult failed(String link, String finalUrl, String reason) {
         return new ArticleIngestResult(link, finalUrl, null, ArticleIngestOutcome.FAILED,
-                null, null, 0, reason);
+                null, null, 0, null, reason);
     }
 }

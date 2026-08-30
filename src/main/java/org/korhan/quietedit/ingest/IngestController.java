@@ -113,11 +113,18 @@ public class IngestController {
             ArticleIngestOutcome outcome,
             UUID documentId,
             int paragraphs,
+            String encoding,
             String reason) {
 
+        /**
+         * {@code encoding} is the verdict as prose rather than three fields: over REST
+         * it is read by a person deciding whether a page needs a look, and null for
+         * every article that never got a body.
+         */
         static ArticleItem of(ArticleIngestResult article) {
             return new ArticleItem(article.link(), article.finalUrl(), article.canonicalUrl(),
-                    article.outcome(), article.documentId(), article.paragraphs(), article.reason());
+                    article.outcome(), article.documentId(), article.paragraphs(),
+                    article.encoding() == null ? null : article.encoding().describe(), article.reason());
         }
     }
 }

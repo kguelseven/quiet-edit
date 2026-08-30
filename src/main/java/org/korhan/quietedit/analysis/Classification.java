@@ -13,5 +13,13 @@ public enum Classification {
     CORRECTION,
 
     /** The article now says something materially different. */
-    SUBSTANTIVE
+    SUBSTANTIVE,
+
+    /**
+     * The text moved because the page's encoding did, not because anyone edited it --
+     * see {@link EncodingRepair}. Its own kind rather than a flavour of
+     * {@code COSMETIC}: cosmetic means a human made a change that does not matter,
+     * while this means no human changed anything at all.
+     */
+    ENCODING_REPAIR
 }

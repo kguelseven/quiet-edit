@@ -2,6 +2,8 @@ package org.korhan.quietedit.versioning;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -32,6 +34,13 @@ import java.util.UUID;
  *
  * <p>{@code rawHtmlRef} holds a path or storage key, never the HTML. Keeping
  * megabytes of markup out of the row keeps the version table scannable.
+ *
+ * <p>The {@link EncodingVerdict} is stored as three plain columns rather than as an
+ * embeddable, because a record cannot be one, and it is optional: it is null on a
+ * version written before the verdict was carried this far. {@code encodingReplaced}
+ * is not nullable and defaults to false, which reads such a row as "text was clean" --
+ * the only safe reading, since the alternative would mark every historical version as
+ * suspect mojibake.
  */
 @Entity
 @Table(
@@ -81,6 +90,22 @@ public class DocumentVersion {
 
     @Column(name = "http_status", nullable = false)
     private int httpStatus;
+
+    /** Canonical charset name the bytes were decoded with; null when not recorded. */
+    @Column(name = "charset")
+    private String charset;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "charset_source")
+    private CharsetSource charsetSource;
+
+    /**
+     * True when this version's text contains U+FFFD because the bytes contradicted
+     * the charset that was chosen. The one field that lets a later observation be read
+     * as an encoding repair rather than as a rewrite.
+     */
+    @Column(name = "encoding_replaced", nullable = false)
+    private boolean encodingReplaced;
 
     protected DocumentVersion() {
         // for JPA
@@ -169,5 +194,19 @@ public class DocumentVersion {
 
     public int getHttpStatus() {
         return httpStatus;
+    }
+
+    /** @return how the bytes were decoded, or null when this version did not record it */
+    public EncodingVerdict getEncoding() {
+        return charset == null || charsetSource == null
+                ? null
+                : new EncodingVerdict(charset, charsetSource, encodingReplaced);
+    }
+
+    /** A null verdict clears all three columns, so "not recorded" stays one state. */
+    public void setEncoding(EncodingVerdict encoding) {
+        this.charset = encoding == null ? null : encoding.charset();
+        this.charsetSource = encoding == null ? null : encoding.source();
+        this.encodingReplaced = encoding != null && encoding.replaced();
     }
 }
