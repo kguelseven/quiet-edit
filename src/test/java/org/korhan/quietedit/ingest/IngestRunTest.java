@@ -16,6 +16,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.korhan.quietedit.PostgresTestContainerConfig;
+import org.korhan.quietedit.versioning.CharsetSource;
 import org.korhan.quietedit.versioning.Document;
 import org.korhan.quietedit.versioning.DocumentRepository;
 import org.korhan.quietedit.versioning.DocumentVersionRepository;
@@ -27,6 +28,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -140,6 +142,13 @@ class IngestRunTest {
         assertThat(ingested.paragraphs()).isEqualTo(2);
         assertThat(ingested.rawHtmlRef()).isNotNull();
         assertThat(ingested.documentId()).isNotNull();
+        assertThat(ingested.encoding()).isNotNull();
+        assertThat(ingested.encoding().charset()).isEqualTo("UTF-8");
+        assertThat(ingested.encoding().source()).isEqualTo(CharsetSource.HTTP_HEADER);
+        assertThat(ingested.encoding().replaced()).isFalse();
+
+        // Nothing was decoded for a link the run declined, so there is nothing to claim.
+        assertThat(article(run, "/dossier.pdf").encoding()).isNull();
 
         // One item in each feed carries no link. The parser drops it and keeps the rest.
         assertThat(feed(run, "/press.xml").entries()).isEqualTo(2);
@@ -304,6 +313,36 @@ class IngestRunTest {
         assertThat(attempts.findById(canonical("/steuerreform")).orElseThrow().getFailureCount()).isEqualTo(1);
     }
 
+    /**
+     * The verdict has to leave the resolver. A page whose bytes contradict its declared
+     * charset is decoded with replacement characters, and the run has to say so on the
+     * result -- otherwise the mojibake reaches the version store as prose and the day
+     * the publisher fixes the header the whole article reads as rewritten.
+     */
+    @Test
+    void anArticleDecodedWithReplacementCharactersSaysSoOnTheResult() {
+        server.stubFor(get("/broken.xml").willReturn(aResponse().withStatus(500)));
+        server.stubFor(get("/press.xml").willReturn(ok(feedBody("Press", "/mojibake", "/steuerreform"))));
+        server.stubFor(get("/wire.xml").willReturn(ok(feedBody("Wire"))));
+        server.stubFor(get("/mojibake").willReturn(latin1PageDeclaringUtf8()));
+        server.stubFor(get("/steuerreform").willReturn(articlePage("Steuerreform beschlossen")));
+
+        IngestRun run = ingestService.runOnce();
+
+        ArticleIngestResult mojibake = article(run, "/mojibake");
+        assertThat(mojibake.outcome()).isEqualTo(ArticleIngestOutcome.NEW);
+        assertThat(mojibake.encoding().charset()).isEqualTo("UTF-8");
+        assertThat(mojibake.encoding().source()).isEqualTo(CharsetSource.DOCUMENT);
+        assertThat(mojibake.encoding().replaced()).isTrue();
+
+        // The article next to it in the same feed is untouched by the neighbour's problem.
+        assertThat(article(run, "/steuerreform").encoding().replaced()).isFalse();
+
+        // Readable over REST too, because deciding a page needs a look is a human's job.
+        IngestController.ArticleItem item = IngestController.ArticleItem.of(mojibake);
+        assertThat(item.encoding()).isEqualTo("UTF-8 (document declaration), with replacement characters");
+    }
+
     /** The endpoint is the same run, so it only has to agree with it. */
     @Test
     void theEndpointReportsTheSameRun() {
@@ -382,6 +421,26 @@ class IngestRunTest {
                   <footer>Alle Rechte vorbehalten.</footer>
                 </body></html>
                 """.formatted(headline, headline));
+    }
+
+    /**
+     * Latin-1 bytes under a {@code utf-8} declaration and no charset in the header, so
+     * the document's own declaration wins and its own bytes refute it. Built as bytes
+     * on purpose: a string would already have been decoded.
+     */
+    private static ResponseDefinitionBuilder latin1PageDeclaringUtf8() {
+        byte[] body = """
+                <!doctype html>
+                <html lang="de"><head><meta charset="utf-8"><title>Grüße aus Köln</title></head>
+                <body>
+                  <article>
+                    <h1>Grüße aus Köln</h1>
+                    <p>Der Bürgermeister sprach über Straßenbahnen und Fußgänger am Rheinufer.</p>
+                    <p>Die Opposition kritisierte das Vorhaben am Abend in scharfen Worten.</p>
+                  </article>
+                </body></html>
+                """.getBytes(Charset.forName("windows-1252"));
+        return aResponse().withStatus(200).withHeader("Content-Type", "text/html").withBody(body);
     }
 
     private static Path createStorageRoot() {

@@ -2,6 +2,8 @@ package org.korhan.quietedit.ingest;
 
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Element;
+import org.korhan.quietedit.versioning.CharsetSource;
+import org.korhan.quietedit.versioning.EncodingVerdict;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,7 +49,7 @@ import java.util.regex.Pattern;
  * <p>Disagreements are reported, never quietly resolved: every declaration that
  * loses against the winner becomes a warning, and so does a declaration that is
  * self-refuting or unusable. {@link #read} returns those warnings so that they can be
- * asserted on; {@link #decode} is the entry point that logs them.
+ * asserted on; {@link #resolve} is the entry point that logs them.
  *
  * <p>Two label rules are taken from the WHATWG Encoding Standard rather than invented
  * here:
@@ -72,6 +74,12 @@ import java.util.regex.Pattern;
  * excludes. The cost is visible and bounded -- the affected characters become U+FFFD,
  * deterministically, so the content hash stays stable and no phantom change is
  * reported; the warning is what tells us the page needs a look.
+ *
+ * <p>That substitution is also recorded, not just warned about: the returned
+ * {@link EncodingVerdict} carries a {@code replaced} flag, because once the U+FFFD are
+ * in the text nothing downstream can tell them from characters the publisher meant to
+ * write. The flag is what lets a version remember that its text is mojibake and lets
+ * change classification recognise the repair when the publisher fixes the header.
  *
  * <p>Known weakness: the document declaration is found by pre-scanning the first
  * {@value #PRESCAN_BYTES} bytes, which assumes an ASCII-compatible encoding for that
@@ -102,31 +110,17 @@ final class EncodingResolver {
     private EncodingResolver() {
     }
 
-    /** Where a charset came from, in descending order of trust. */
-    enum Source {
-
-        BOM("byte order mark"),
-        HTTP_HEADER("HTTP Content-Type"),
-        DOCUMENT("document declaration"),
-        DEFAULT("default");
-
-        private final String label;
-
-        Source(String label) {
-            this.label = label;
-        }
-
-        String label() {
-            return label;
-        }
-    }
-
     /**
-     * The decoded text plus how the charset was arrived at. {@code warnings} holds
-     * every contradiction and unusable declaration found on the way, in the order they
-     * were found; it is empty for the ordinary case of one declaration that is right.
+     * The decoded text plus the {@link EncodingVerdict} that produced it.
+     * {@code warnings} holds every contradiction and unusable declaration found on the
+     * way, in the order they were found; it is empty for the ordinary case of one
+     * declaration that is right.
+     *
+     * <p>The verdict is returned rather than only logged because a warning is read by
+     * a human, once, if anyone is looking. The same fact has to survive to the version
+     * store, where it is what separates mojibake from prose.
      */
-    record Decoded(String text, Charset charset, Source source, List<String> warnings) {
+    record Decoded(String text, EncodingVerdict verdict, List<String> warnings) {
 
         Decoded {
             warnings = List.copyOf(warnings);
@@ -134,33 +128,35 @@ final class EncodingResolver {
     }
 
     /**
-     * Decodes {@code body} and logs whatever was contradictory about it.
+     * Decodes {@code body}, logs whatever was contradictory about it, and hands the
+     * verdict back so that the caller can record it.
      *
      * @param origin the feed or article URL, so that a warning names the page it is about
      */
-    static String decode(byte[] body, String contentType, String origin) {
+    static Decoded resolve(byte[] body, String contentType, String origin) {
         Decoded decoded = read(body, contentType);
         for (String warning : decoded.warnings()) {
             log.warn("{}: {}", origin, warning);
         }
-        return decoded.text();
+        return decoded;
     }
 
     /** The decision itself, with no logging, so that a test can assert on the warnings. */
     static Decoded read(byte[] body, String contentType) {
         if (body == null || body.length == 0) {
-            return new Decoded("", StandardCharsets.UTF_8, Source.DEFAULT, List.of());
+            return new Decoded("", new EncodingVerdict(StandardCharsets.UTF_8, CharsetSource.DEFAULT, false),
+                    List.of());
         }
 
         List<String> warnings = new ArrayList<>();
         Bom bom = Bom.of(body);
         List<Declaration> declarations = new ArrayList<>();
-        add(declarations, Source.BOM, bom == null ? null : bom.charsetName(), warnings);
-        add(declarations, Source.HTTP_HEADER, charsetParameter(contentType), warnings);
-        add(declarations, Source.DOCUMENT, documentLabel(body, bom), warnings);
+        add(declarations, CharsetSource.BOM, bom == null ? null : bom.charsetName(), warnings);
+        add(declarations, CharsetSource.HTTP_HEADER, charsetParameter(contentType), warnings);
+        add(declarations, CharsetSource.DOCUMENT, documentLabel(body, bom), warnings);
 
         Declaration winner = declarations.isEmpty()
-                ? new Declaration(Source.DEFAULT, "utf-8", StandardCharsets.UTF_8)
+                ? new Declaration(CharsetSource.DEFAULT, "utf-8", StandardCharsets.UTF_8)
                 : declarations.getFirst();
         for (Declaration loser : declarations.subList(declarations.isEmpty() ? 0 : 1, declarations.size())) {
             if (!loser.charset().equals(winner.charset())) {
@@ -172,8 +168,13 @@ final class EncodingResolver {
         }
 
         int offset = bom == null ? 0 : bom.length();
-        String text = decodeText(body, offset, winner, warnings);
-        return new Decoded(text, winner.charset(), winner.source(), warnings);
+        Text text = decodeText(body, offset, winner, warnings);
+        return new Decoded(text.value(),
+                new EncodingVerdict(winner.charset(), winner.source(), text.replaced()), warnings);
+    }
+
+    /** Decoded text and whether producing it cost any characters. */
+    private record Text(String value, boolean replaced) {
     }
 
     /**
@@ -181,10 +182,11 @@ final class EncodingResolver {
      * noticed at all; replacement second, because a page with a handful of bad bytes is
      * still a page worth monitoring.
      */
-    private static String decodeText(byte[] body, int offset, Declaration winner, List<String> warnings) {
+    private static Text decodeText(byte[] body, int offset, Declaration winner, List<String> warnings) {
         ByteBuffer bytes = ByteBuffer.wrap(body, offset, body.length - offset);
         try {
-            return stripLeadingBom(winner.charset().newDecoder().decode(bytes.duplicate()).toString());
+            return new Text(stripLeadingBom(winner.charset().newDecoder().decode(bytes.duplicate()).toString()),
+                    false);
         } catch (CharacterCodingException e) {
             warnings.add("the bytes are not valid %s, which %s declared; decoding with replacement characters"
                     .formatted(winner.charset().name(), winner.source().label()));
@@ -193,10 +195,11 @@ final class EncodingResolver {
                 .onMalformedInput(CodingErrorAction.REPLACE)
                 .onUnmappableCharacter(CodingErrorAction.REPLACE);
         try {
-            return stripLeadingBom(lenient.decode(bytes.duplicate()).toString());
+            return new Text(stripLeadingBom(lenient.decode(bytes.duplicate()).toString()), true);
         } catch (CharacterCodingException impossible) {
             // A decoder set to REPLACE cannot report an error; UTF-8 is the last resort.
-            return stripLeadingBom(new String(body, offset, body.length - offset, StandardCharsets.UTF_8));
+            return new Text(
+                    stripLeadingBom(new String(body, offset, body.length - offset, StandardCharsets.UTF_8)), true);
         }
     }
 
@@ -209,7 +212,8 @@ final class EncodingResolver {
         return text.startsWith("\uFEFF") ? text.substring(1) : text;
     }
 
-    private static void add(List<Declaration> declarations, Source source, String label, List<String> warnings) {
+    private static void add(List<Declaration> declarations, CharsetSource source, String label,
+                            List<String> warnings) {
         if (label == null) {
             return;
         }
@@ -223,9 +227,9 @@ final class EncodingResolver {
      * @return the charset to use for {@code label}, or null when the label is unusable
      *         and the source should be treated as if it had said nothing
      */
-    private static Charset charsetFor(Source source, String label, List<String> warnings) {
+    private static Charset charsetFor(CharsetSource source, String label, List<String> warnings) {
         String normalised = label.trim().toLowerCase(Locale.ROOT);
-        if (source == Source.DOCUMENT && normalised.startsWith("utf-16")) {
+        if (source == CharsetSource.DOCUMENT && normalised.startsWith("utf-16")) {
             warnings.add(("the document declares %s, but its declaration was readable as single-byte text, "
                     + "so it cannot be UTF-16; ignoring it").formatted(label));
             return null;
@@ -345,7 +349,7 @@ final class EncodingResolver {
     }
 
     /** One source's claim, with the charset it resolved to. */
-    private record Declaration(Source source, String label, Charset charset) {
+    private record Declaration(CharsetSource source, String label, Charset charset) {
     }
 
     /**

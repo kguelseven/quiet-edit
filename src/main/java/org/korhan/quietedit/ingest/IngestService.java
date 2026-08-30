@@ -1,6 +1,7 @@
 package org.korhan.quietedit.ingest;
 
 import org.korhan.quietedit.versioning.DocumentRegistry;
+import org.korhan.quietedit.versioning.EncodingVerdict;
 import org.korhan.quietedit.versioning.UrlCanonicalizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +39,11 @@ import java.util.stream.Collectors;
  * content hash and the version store, and those are separate tickets. The result
  * object's {@code NEW}/{@code UNCHANGED} split is therefore about identity, not
  * content -- see {@link ArticleIngestOutcome}.
+ *
+ * <p>What a run does carry out is the {@link EncodingVerdict} for every article it
+ * decoded. It cannot act on it -- there is no version to attach it to yet -- but it
+ * is the only stage that knows it, so dropping it here would mean reconstructing at
+ * classification time a fact that was certain at fetch time.
  *
  * <p>Failure isolation is the load-bearing property. Every stage turns its expected
  * failures into results rather than exceptions, and each stage is additionally
@@ -149,6 +155,13 @@ public class IngestService {
                 run.checked(), run.count(ArticleIngestOutcome.NEW), run.count(ArticleIngestOutcome.UNCHANGED),
                 run.count(ArticleIngestOutcome.SKIPPED), run.count(ArticleIngestOutcome.FAILED),
                 run.count(ArticleIngestOutcome.DEFERRED), run.count(ArticleIngestOutcome.ABANDONED));
+        long mojibake = run.articles().stream()
+                .filter(article -> article.encoding() != null && article.encoding().replaced())
+                .count();
+        if (mojibake > 0) {
+            log.warn("{} articles were decoded with replacement characters; their text is mojibake, not prose",
+                    mojibake);
+        }
         return run;
     }
 
@@ -247,7 +260,10 @@ public class IngestService {
         }
         FeedParseResult parse;
         try {
-            String body = EncodingResolver.decode(fetch.body(), fetch.contentType(), fetch.url());
+            // A feed's verdict is logged and dropped on purpose: nothing versions a feed
+            // body, so there is no row to record it on. The article verdict is the one
+            // that has to survive, and it is resolved separately in read().
+            String body = EncodingResolver.resolve(fetch.body(), fetch.contentType(), fetch.url()).text();
             parse = feedParser.parse(fetch.url(), body);
         } catch (RuntimeException e) {
             log.error("Unexpected failure while parsing {}", fetch.url(), e);
@@ -308,13 +324,15 @@ public class IngestService {
      * extracted belongs in memory.
      */
     private Attempt read(Candidate candidate, ArticleFetchResult fetch) {
-        String html;
+        EncodingResolver.Decoded decoded;
         try {
-            html = EncodingResolver.decode(rawHtml.read(fetch.rawHtmlRef()), fetch.contentType(), fetch.finalUrl());
+            decoded = EncodingResolver.resolve(
+                    rawHtml.read(fetch.rawHtmlRef()), fetch.contentType(), fetch.finalUrl());
         } catch (RuntimeException e) {
             return Attempt.decided(candidate, ArticleIngestResult.failed(
                     candidate.link(), fetch.finalUrl(), "raw html unreadable: " + e.getMessage()));
         }
+        String html = decoded.text();
         ArticleContent content = articleExtractor.extract(html);
         if (content.isEmpty()) {
             return Attempt.decided(candidate, ArticleIngestResult.skipped(
@@ -327,7 +345,7 @@ public class IngestService {
             return Attempt.decided(candidate, ArticleIngestResult.failed(
                     candidate.link(), fetch.finalUrl(), "unusable url: " + e.getMessage()));
         }
-        return new Attempt(candidate, fetch, canonicalUrl, content, null);
+        return new Attempt(candidate, fetch, canonicalUrl, content, decoded.verdict(), null);
     }
 
     /** The only stage that writes documents, and it runs single-threaded. */
@@ -342,7 +360,7 @@ public class IngestService {
                     documents.register(attempt.canonicalUrl(), candidate.feedId(), fetch.fetchedAt());
             return ArticleIngestResult.ingested(candidate.link(), fetch.finalUrl(), attempt.canonicalUrl(),
                     registration.created(), registration.documentId(), fetch.rawHtmlRef(),
-                    attempt.content().paragraphs().size());
+                    attempt.content().paragraphs().size(), attempt.encoding());
         } catch (RuntimeException e) {
             log.error("Could not register {}", attempt.canonicalUrl(), e);
             return ArticleIngestResult.failed(candidate.link(), fetch.finalUrl(),
@@ -413,13 +431,14 @@ public class IngestService {
 
     /**
      * One article after the network stage. Either {@code decided} is set -- the
-     * article needs no document -- or the content and canonical URL are.
+     * article needs no document -- or the content, canonical URL and encoding verdict
+     * are.
      */
     private record Attempt(Candidate candidate, ArticleFetchResult fetch, String canonicalUrl,
-                           ArticleContent content, ArticleIngestResult decided) {
+                           ArticleContent content, EncodingVerdict encoding, ArticleIngestResult decided) {
 
         static Attempt decided(Candidate candidate, ArticleIngestResult result) {
-            return new Attempt(candidate, null, null, null, result);
+            return new Attempt(candidate, null, null, null, null, result);
         }
     }
 }

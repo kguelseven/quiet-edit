@@ -2,6 +2,7 @@ package org.korhan.quietedit.ingest;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.korhan.quietedit.versioning.CharsetSource;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -28,8 +29,9 @@ class EncodingResolverTest {
         EncodingResolver.Decoded decoded = EncodingResolver.read(
                 fixture("bom-utf8-meta-latin1.html"), "text/html; charset=iso-8859-1");
 
-        assertThat(decoded.source()).isEqualTo(EncodingResolver.Source.BOM);
-        assertThat(decoded.charset()).isEqualTo(StandardCharsets.UTF_8);
+        assertThat(decoded.verdict().source()).isEqualTo(CharsetSource.BOM);
+        assertThat(decoded.verdict().charset()).isEqualTo(StandardCharsets.UTF_8.name());
+        assertThat(decoded.verdict().replaced()).isFalse();
         assertThat(decoded.text()).startsWith("<!doctype html>").contains("Bürgermeister", "Fußgänger");
         assertThat(decoded.warnings()).hasSize(2).allSatisfy(w -> assertThat(w).startsWith("charset conflict"));
     }
@@ -40,8 +42,8 @@ class EncodingResolverTest {
         EncodingResolver.Decoded decoded = EncodingResolver.read(
                 fixture("header-utf8-meta-latin1.html"), "text/html; charset=\"UTF-8\"");
 
-        assertThat(decoded.source()).isEqualTo(EncodingResolver.Source.HTTP_HEADER);
-        assertThat(decoded.charset()).isEqualTo(StandardCharsets.UTF_8);
+        assertThat(decoded.verdict().source()).isEqualTo(CharsetSource.HTTP_HEADER);
+        assertThat(decoded.verdict().charset()).isEqualTo(StandardCharsets.UTF_8.name());
         assertThat(decoded.text()).contains("Bürgermeister", "Straßenbahnen");
         assertThat(decoded.warnings()).singleElement().asString()
                 .contains("HTTP Content-Type says UTF-8", "document declaration says windows-1252");
@@ -53,8 +55,8 @@ class EncodingResolverTest {
         EncodingResolver.Decoded decoded = EncodingResolver.read(
                 fixture("feed-xmldecl-latin1.xml"), "application/rss+xml");
 
-        assertThat(decoded.source()).isEqualTo(EncodingResolver.Source.DOCUMENT);
-        assertThat(decoded.charset()).isEqualTo(WINDOWS_1252);
+        assertThat(decoded.verdict().source()).isEqualTo(CharsetSource.DOCUMENT);
+        assertThat(decoded.verdict().charset()).isEqualTo(WINDOWS_1252.name());
         assertThat(decoded.text()).contains("Straßenbahn fährt wieder", "Über Köln und Düsseldorf");
         assertThat(decoded.warnings()).isEmpty();
     }
@@ -65,8 +67,9 @@ class EncodingResolverTest {
         EncodingResolver.Decoded decoded = EncodingResolver.read(
                 fixture("feed-xmldecl-latin1.xml"), "application/rss+xml; charset=utf-8");
 
-        assertThat(decoded.source()).isEqualTo(EncodingResolver.Source.HTTP_HEADER);
-        assertThat(decoded.charset()).isEqualTo(StandardCharsets.UTF_8);
+        assertThat(decoded.verdict().source()).isEqualTo(CharsetSource.HTTP_HEADER);
+        assertThat(decoded.verdict().charset()).isEqualTo(StandardCharsets.UTF_8.name());
+        assertThat(decoded.verdict().replaced()).isTrue();
         assertThat(decoded.warnings()).hasSize(2);
         assertThat(decoded.warnings().getFirst()).startsWith("charset conflict");
         assertThat(decoded.warnings().getLast()).isEqualTo(
@@ -87,8 +90,8 @@ class EncodingResolverTest {
 
         EncodingResolver.Decoded decoded = EncodingResolver.read(body, "text/html");
 
-        assertThat(decoded.source()).isEqualTo(EncodingResolver.Source.DOCUMENT);
-        assertThat(decoded.charset()).isEqualTo(StandardCharsets.UTF_8);
+        assertThat(decoded.verdict().source()).isEqualTo(CharsetSource.DOCUMENT);
+        assertThat(decoded.verdict().charset()).isEqualTo(StandardCharsets.UTF_8.name());
         assertThat(decoded.warnings()).singleElement().asString()
                 .isEqualTo("the bytes are not valid UTF-8, which document declaration declared; "
                         + "decoding with replacement characters");
@@ -101,8 +104,8 @@ class EncodingResolverTest {
     void anUnknownCharsetFallsBackToUtf8() {
         EncodingResolver.Decoded decoded = EncodingResolver.read(fixture("bogus-meta-charset.html"), "text/html");
 
-        assertThat(decoded.source()).isEqualTo(EncodingResolver.Source.DEFAULT);
-        assertThat(decoded.charset()).isEqualTo(StandardCharsets.UTF_8);
+        assertThat(decoded.verdict().source()).isEqualTo(CharsetSource.DEFAULT);
+        assertThat(decoded.verdict().charset()).isEqualTo(StandardCharsets.UTF_8.name());
         assertThat(decoded.text()).contains("Bürgermeister");
         assertThat(decoded.warnings()).singleElement().asString()
                 .isEqualTo("document declaration declares the unknown charset 'utf-8859-1'; ignoring it");
@@ -113,7 +116,7 @@ class EncodingResolverTest {
     void latin1IsDecodedAsWindows1252() {
         EncodingResolver.Decoded decoded = EncodingResolver.read(fixture("cp1252-quotes.html"), "text/html");
 
-        assertThat(decoded.charset()).isEqualTo(WINDOWS_1252);
+        assertThat(decoded.verdict().charset()).isEqualTo(WINDOWS_1252.name());
         assertThat(decoded.text()).contains("“ein Versehen” – mehr nicht");
         assertThat(decoded.warnings()).isEmpty();
     }
@@ -123,8 +126,8 @@ class EncodingResolverTest {
     void aUtf16DeclarationInTheDocumentIsRefused() {
         EncodingResolver.Decoded decoded = EncodingResolver.read(fixture("meta-utf16.html"), "text/html");
 
-        assertThat(decoded.source()).isEqualTo(EncodingResolver.Source.DEFAULT);
-        assertThat(decoded.charset()).isEqualTo(StandardCharsets.UTF_8);
+        assertThat(decoded.verdict().source()).isEqualTo(CharsetSource.DEFAULT);
+        assertThat(decoded.verdict().charset()).isEqualTo(StandardCharsets.UTF_8.name());
         assertThat(decoded.text()).contains("Bürgermeister");
         assertThat(decoded.warnings()).singleElement().asString().contains("cannot be UTF-16");
     }
@@ -135,10 +138,32 @@ class EncodingResolverTest {
         EncodingResolver.Decoded decoded = EncodingResolver.read(
                 fixture("utf16le-bom.xml"), "application/rss+xml; charset=utf-8");
 
-        assertThat(decoded.source()).isEqualTo(EncodingResolver.Source.BOM);
-        assertThat(decoded.charset()).isEqualTo(StandardCharsets.UTF_16LE);
+        assertThat(decoded.verdict().source()).isEqualTo(CharsetSource.BOM);
+        assertThat(decoded.verdict().charset()).isEqualTo(StandardCharsets.UTF_16LE.name());
         assertThat(decoded.text()).startsWith("<?xml").contains("<title>Grüße</title>");
         assertThat(decoded.warnings()).singleElement().asString().startsWith("charset conflict");
+    }
+
+    /**
+     * The flag, not the warning, is what survives the fetch. Asserted against a clean
+     * body of the same shape so that the only difference between the two verdicts is
+     * whether characters were lost.
+     */
+    @Test
+    @DisplayName("the verdict says whether characters were lost, not only the log")
+    void theVerdictRecordsWhetherCharactersWereLost() {
+        EncodingResolver.Decoded lossy = EncodingResolver.read(fixture("latin1-declaring-utf8.html"), "text/html");
+        EncodingResolver.Decoded clean = EncodingResolver.read(
+                fixture("latin1-declaring-utf8.html"), "text/html; charset=iso-8859-1");
+
+        assertThat(lossy.verdict().replaced()).isTrue();
+        assertThat(lossy.verdict().describe())
+                .isEqualTo("UTF-8 (document declaration), with replacement characters");
+
+        assertThat(clean.verdict().replaced()).isFalse();
+        assertThat(clean.verdict().charset()).isEqualTo(WINDOWS_1252.name());
+        assertThat(clean.text()).contains("Bürgermeister").doesNotContain("�");
+        assertThat(clean.verdict().lossFlippedFrom(lossy.verdict())).isTrue();
     }
 
     @Test

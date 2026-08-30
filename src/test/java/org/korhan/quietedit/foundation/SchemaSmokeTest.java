@@ -15,10 +15,12 @@ import org.korhan.quietedit.analysis.ChangeRepository;
 import org.korhan.quietedit.analysis.Classification;
 import org.korhan.quietedit.ingest.Feed;
 import org.korhan.quietedit.ingest.FeedRepository;
+import org.korhan.quietedit.versioning.CharsetSource;
 import org.korhan.quietedit.versioning.Document;
 import org.korhan.quietedit.versioning.DocumentRepository;
 import org.korhan.quietedit.versioning.DocumentVersion;
 import org.korhan.quietedit.versioning.DocumentVersionRepository;
+import org.korhan.quietedit.versioning.EncodingVerdict;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -64,6 +66,7 @@ class SchemaSmokeTest {
 
         DocumentVersion first = newVersion(documentId, now, "a".repeat(64));
         DocumentVersion second = newVersion(documentId, now, "b".repeat(64));
+        second.setEncoding(new EncodingVerdict("UTF-8", CharsetSource.HTTP_HEADER, true));
         UUID firstId = versions.saveAndFlush(first).getId();
         UUID secondId = versions.saveAndFlush(second).getId();
 
@@ -98,6 +101,12 @@ class SchemaSmokeTest {
         assertThat(readVersion.getSimhash()).isEqualTo(42L);
         assertThat(readVersion.isPublishedAtExact()).isTrue();
         assertThat(readVersion.getHttpStatus()).isEqualTo(200);
+        assertThat(readVersion.getEncoding())
+                .isEqualTo(new EncodingVerdict("UTF-8", CharsetSource.HTTP_HEADER, true));
+
+        // A version that recorded no verdict has to read back as "unknown", not as a
+        // clean decode: getEncoding() is null while the flag column keeps its default.
+        assertThat(versions.findById(firstId).orElseThrow().getEncoding()).isNull();
 
         Change readChange = changes.findById(changeId).orElseThrow();
         assertThat(readChange.getFromVersionId()).isEqualTo(firstId);
