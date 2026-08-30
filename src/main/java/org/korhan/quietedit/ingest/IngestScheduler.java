@@ -1,5 +1,7 @@
 package org.korhan.quietedit.ingest;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -15,11 +17,18 @@ import org.springframework.stereotype.Component;
  * caught -- {@code runOnce()} contains its own failures, and Spring logs and
  * reschedules anything that still escapes, which a {@code catch} here could only
  * imitate.
+ *
+ * <p>The one exception is a collision with a manually triggered run, which is an
+ * expected outcome rather than a failure and would otherwise be logged as an error
+ * every time an operator polls by hand. Skipping the tick is the whole response;
+ * the policy that a second run is refused lives in the service, not here.
  */
 @Component
 @ConditionalOnProperty(prefix = "quietedit.ingest.schedule", name = "enabled",
         havingValue = "true", matchIfMissing = true)
 public class IngestScheduler {
+
+    private static final Logger log = LoggerFactory.getLogger(IngestScheduler.class);
 
     private final IngestService service;
 
@@ -29,6 +38,10 @@ public class IngestScheduler {
 
     @Scheduled(fixedDelayString = "${quietedit.ingest.schedule.interval:15m}")
     void poll() {
-        service.runOnce();
+        try {
+            service.runOnce();
+        } catch (IngestAlreadyRunningException e) {
+            log.info("Scheduled ingest skipped: {}", e.getMessage());
+        }
     }
 }

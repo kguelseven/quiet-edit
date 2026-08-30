@@ -37,6 +37,15 @@ public record ArticleIngestResult(
                 null, null, 0, reason);
     }
 
+    /**
+     * No URL beyond the advertised link, because a deferred candidate was never
+     * fetched: there is no redirect chain and no page to canonicalise yet.
+     */
+    static ArticleIngestResult deferred(String link) {
+        return new ArticleIngestResult(link, null, null, ArticleIngestOutcome.DEFERRED,
+                null, null, 0, "deferred by the run's article budget");
+    }
+
     static ArticleIngestResult failed(String link, String finalUrl, String reason) {
         return new ArticleIngestResult(link, finalUrl, null, ArticleIngestOutcome.FAILED,
                 null, null, 0, reason);

@@ -1,0 +1,6 @@
+# Catalogue for the run-guard integration test. One feed, so the article ceiling
+# and the single-run guard can be driven without a second publisher's timing
+# getting in the way.
+feeds:
+  - url: "${test.wiremock.base-url}/press.xml"
+    name: "Press"
