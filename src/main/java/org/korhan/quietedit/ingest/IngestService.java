@@ -42,6 +42,14 @@ import java.util.stream.Collectors;
  * revision. A run only reports the verdict it gets back, which is what keeps
  * "has this text moved" a single answer with a single implementation.
  *
+ * <p>The feed's publication date is normalised here, at the moment the version is
+ * written, and against that version's own {@code fetchedAt}. Doing it earlier -- at
+ * planning time, against the run's start -- would measure "is this date in the
+ * future" against a clock reading that no row records, so a discarded date would be
+ * replaced by a timestamp appearing nowhere in the history. Only the feed's
+ * publication date is read; its {@code updated} date is deliberately not consulted,
+ * because what changed is decided by comparing fetched text, never by a claim.
+ *
  * <p>The {@link EncodingVerdict} travels with the article all the way into that
  * store. This is the only stage that knows how the bytes were decoded, so dropping
  * it here would mean reconstructing at classification time a fact that was certain
@@ -378,11 +386,12 @@ public class IngestService {
             return ArticleIngestResult.failed(candidate.link(), fetch.finalUrl(),
                     "not registered: " + e.getClass().getSimpleName());
         }
+        NormalisedDate published = DateNormalizer.normalize(candidate.publishedRaw(), fetch.fetchedAt());
         VersionStore.Stored stored;
         try {
-            stored = versions.record(registration.documentId(), Observation.of(
+            stored = versions.record(registration.documentId(), new Observation(
                     fetch.fetchedAt(), attempt.content(), statusOf(fetch), candidate.feedTitle(),
-                    fetch.rawHtmlRef(), attempt.encoding()));
+                    fetch.rawHtmlRef(), published.instant(), published.exact(), attempt.encoding()));
         } catch (RuntimeException e) {
             log.error("Could not version {}", attempt.canonicalUrl(), e);
             return ArticleIngestResult.failed(candidate.link(), fetch.finalUrl(),
@@ -441,8 +450,9 @@ public class IngestService {
             for (int slot = 0; slot < parse.entries().size(); slot++) {
                 String link = parse.entries().get(slot).link().trim();
                 if (seenLinks.add(link)) {
+                    FeedEntry entry = parse.entries().get(slot);
                     work.candidates.add(new Candidate(work, slot, fetch.feedId(), link,
-                            identity.apply(link), parse.entries().get(slot).title()));
+                            identity.apply(link), entry.title(), entry.publishedRaw()));
                 } else {
                     work.articles[slot] = ArticleIngestResult.skipped(link, null, "duplicate link in this run");
                 }
@@ -460,14 +470,18 @@ public class IngestService {
     }
 
     /**
-     * @param identity  what the budget and the attempt log key this link by, resolved
-     *                  before the fetch because the ranking happens before the fetch
-     * @param feedTitle the headline as the feed advertised it, kept beside the one the
-     *                  page carries: a feed and a page that disagree about a headline
-     *                  is itself a signal, and only the version can record it
+     * @param identity     what the budget and the attempt log key this link by, resolved
+     *                     before the fetch because the ranking happens before the fetch
+     * @param feedTitle    the headline as the feed advertised it, kept beside the one the
+     *                     page carries: a feed and a page that disagree about a headline
+     *                     is itself a signal, and only the version can record it
+     * @param publishedRaw the feed's publication date, still as the publisher wrote it.
+     *                     It is normalised in {@link #resolve}, not here, so that the
+     *                     retrieval time it is measured against is the very timestamp the
+     *                     version is written with rather than a slightly earlier one
      */
     private record Candidate(FeedWork work, int slot, UUID feedId, String link, String identity,
-                             String feedTitle) {
+                             String feedTitle, String publishedRaw) {
     }
 
     /**

@@ -252,12 +252,14 @@ class VersionStoreTest {
     }
 
     private static Observation observation(Instant fetchedAt, String paragraph) {
-        return Observation.of(
+        return new Observation(
                 fetchedAt,
                 new ArticleContent("Kopfzeile", List.of(paragraph)),
                 200,
                 "Wie der Feed es nannte",
                 "raw/artikel.html",
+                fetchedAt.minusSeconds(600),
+                true,
                 new EncodingVerdict("UTF-8", CharsetSource.HTTP_HEADER, false));
     }
 }
