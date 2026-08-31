@@ -2,8 +2,8 @@ feeds:
   # --- Schweiz ---
   - url: "https://www.srf.ch/news/bnf/rss/1646"
     name: "SRF News"
-  - url: "https://www.nzz.ch/recent.rss"
-    name: "NZZ"
+  # - url: "https://www.nzz.ch/recent.rss"
+  #    name: "NZZ"
   - url: "https://www.watson.ch/api/1.0/rss.xml"
     name: "Watson"
   - url: "https://partner-feeds.beta.20min.ch/rss/20minuten"
