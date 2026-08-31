@@ -56,6 +56,14 @@ import java.util.UUID;
 @Import(PostgresTestContainerConfig.class)
 class IngestRunTest {
 
+    /**
+     * The canonical URL a syndicated copy declares: another publisher's host, which no
+     * feed in this catalogue subscribes to and which nothing here ever serves. That is
+     * the point -- a run that requests it has regressed, and the assertion is that it
+     * is never requested.
+     */
+    private static final String SYNDICATION_ORIGINAL = "https://original.example/nachrichten/artikel-4711";
+
     private static final WireMockServer server = new WireMockServer(wireMockConfig().dynamicPort());
 
     private static final Path storageRoot = createStorageRoot();
@@ -456,6 +464,77 @@ class IngestRunTest {
     }
 
     /**
+     * The bug behind quietedit-cca.9, end to end. A publisher republishes another's
+     * copy and points {@code rel=canonical} at the original, so the document is filed
+     * under a host no feed subscribes to while its text was read somewhere else. Both
+     * candidate sources then wanted it -- the feed by its own link, the store by the
+     * canonical id -- and the two fetched different pages under one identity, so every
+     * run appended a revision reporting an edit nobody made.
+     *
+     * <p>Two runs over a page that does not move: one document, one revision, two
+     * requests, and the foreign canonical URL never requested at all. Without the fix
+     * the second run fetches twice and the store holds two revisions.
+     */
+    @Test
+    void aSyndicatedArticleIsOfferedOncePerRunAndGainsNoPhantomRevision() {
+        server.stubFor(get("/broken.xml").willReturn(aResponse().withStatus(500)));
+        server.stubFor(get("/press.xml").willReturn(ok(feedBody("Press", "/syndiziert"))));
+        server.stubFor(get("/wire.xml").willReturn(ok(feedBody("Wire"))));
+        server.stubFor(get("/syndiziert").willReturn(
+                syndicatedPage("Steuerreform beschlossen", SYNDICATION_ORIGINAL)));
+
+        IngestRun first = ingestService.runOnce();
+        assertThat(first.count(ArticleIngestOutcome.NEW)).isEqualTo(1);
+
+        IngestRun second = ingestService.runOnce();
+
+        assertThat(second.count(ArticleIngestOutcome.UNCHANGED)).isEqualTo(1);
+        assertThat(second.count(ArticleIngestOutcome.CHANGED)).isZero();
+        // The store's half of the policy offered nothing: the feed already had it.
+        assertThat(second.rechecks()).isEmpty();
+
+        assertThat(documents.count()).isEqualTo(1);
+        assertThat(versions.count()).isEqualTo(1);
+        server.verify(2, getRequestedFor(urlEqualTo("/syndiziert")));
+
+        Document document = documents.findByCanonicalUrl(SYNDICATION_ORIGINAL).orElseThrow();
+        assertThat(document.getVersionCount()).isEqualTo(1);
+        // Identity is the original publisher's URL; the origin is where the text was read.
+        assertThat(document.getObservedOriginUrl()).isEqualTo(canonical("/syndiziert"));
+    }
+
+    /**
+     * The other half of the same fix: once the feed has dropped the entry, the re-check
+     * asks for the page the text came from and not for the canonical id, which belongs
+     * to a publisher this document has never been read from.
+     *
+     * <p>Asserted as an offer rather than as a fetched article, for the same reason as
+     * {@link #documentsNoFeedAdvertisesAnyMoreAreOfferedUntilTheirWindowCloses}: a
+     * re-check requests a canonicalised URL, which is https, and WireMock here serves
+     * plain http. Which URL the run asks for is decided before anything is fetched,
+     * and that is the decision this test is about.
+     */
+    @Test
+    void aReCheckAsksForThePageTheTextCameFromNotForTheCanonicalId() {
+        server.stubFor(get("/broken.xml").willReturn(aResponse().withStatus(500)));
+        server.stubFor(get("/press.xml").willReturn(ok(feedBody("Press", "/syndiziert"))));
+        server.stubFor(get("/wire.xml").willReturn(ok(feedBody("Wire"))));
+        server.stubFor(get("/syndiziert").willReturn(
+                syndicatedPage("Steuerreform beschlossen", SYNDICATION_ORIGINAL)));
+
+        assertThat(ingestService.runOnce().count(ArticleIngestOutcome.NEW)).isEqualTo(1);
+
+        // The feed has moved on; only the store still knows the article.
+        server.stubFor(get("/press.xml").willReturn(ok(feedBody("Press"))));
+        IngestRun second = ingestService.runOnce();
+
+        assertThat(second.rechecks()).extracting(ArticleIngestResult::link)
+                .containsExactly(canonical("/syndiziert"));
+        assertThat(second.rechecks()).extracting(ArticleIngestResult::link)
+                .doesNotContain(SYNDICATION_ORIGINAL);
+    }
+
+    /**
      * The re-check policy, reached through a run: an article nothing has been observed
      * to do for a month is not fetched again, and the run says why rather than staying
      * silent about a link it declined.
@@ -658,6 +737,26 @@ class IngestRunTest {
                   <footer>Alle Rechte vorbehalten.</footer>
                 </body></html>
                 """.formatted(headline, headline));
+    }
+
+    /** An article that declares another publisher's URL as its canonical one. */
+    private static ResponseDefinitionBuilder syndicatedPage(String headline, String canonicalUrl) {
+        return okForContentType("text/html; charset=utf-8", """
+                <!doctype html>
+                <html lang="de"><head>
+                  <title>%s</title>
+                  <link rel="canonical" href="%s">
+                </head>
+                <body>
+                  <nav><a href="/">Startseite</a></nav>
+                  <article>
+                    <h1>%s</h1>
+                    <p>Der Bundestag hat am Montag nach langer Debatte einen Beschluss gefasst.</p>
+                    <p>Die Opposition kritisierte das Vorhaben am Abend in scharfen Worten.</p>
+                  </article>
+                  <footer>Alle Rechte vorbehalten.</footer>
+                </body></html>
+                """.formatted(headline, canonicalUrl, headline));
     }
 
     /**

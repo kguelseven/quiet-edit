@@ -16,17 +16,28 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
     Optional<Document> findByCanonicalUrl(String canonicalUrl);
 
     /**
-     * What is known about each of these canonical URLs. One query rather than a
-     * lookup per URL: the caller decides a whole run's candidates before fetching any
-     * of them.
+     * What is known about each of these URLs, matched against identity <em>or</em>
+     * observed origin. One query rather than a lookup per URL: the caller decides a
+     * whole run's candidates before fetching any of them.
+     *
+     * <p>Both columns, because the URL the caller has is a feed link resolved without
+     * a fetch, and under syndication that link is the origin while the document is
+     * filed under another publisher's canonical URL. Matching identity alone made such
+     * a link look unseen, which is what let one document be fetched twice in one run.
+     *
+     * <p>A row can match on either column, so the caller -- not this query -- decides
+     * which requested URL each row answers for; see
+     * {@link DocumentRegistry#observationsOf}.
      */
     @Query("""
             select new org.korhan.quietedit.versioning.DocumentObservation(
-                d.id, d.canonicalUrl, d.feedId, d.firstSeenAt, d.lastCheckedAt, d.lastChangedAt, d.versionCount)
+                d.id, d.canonicalUrl, d.observedOriginUrl, d.feedId,
+                d.firstSeenAt, d.lastCheckedAt, d.lastChangedAt, d.versionCount)
             from Document d
-            where d.canonicalUrl in :canonicalUrls
+            where d.canonicalUrl in :urls
+               or d.observedOriginUrl in :urls
             """)
-    List<DocumentObservation> observationsOf(@Param("canonicalUrls") Collection<String> canonicalUrls);
+    List<DocumentObservation> observationsOf(@Param("urls") Collection<String> urls);
 
     /**
      * Documents that could still be due for another look, most overdue first.
@@ -56,7 +67,8 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
      */
     @Query("""
             select new org.korhan.quietedit.versioning.DocumentObservation(
-                d.id, d.canonicalUrl, d.feedId, d.firstSeenAt, d.lastCheckedAt, d.lastChangedAt, d.versionCount)
+                d.id, d.canonicalUrl, d.observedOriginUrl, d.feedId,
+                d.firstSeenAt, d.lastCheckedAt, d.lastChangedAt, d.versionCount)
             from Document d
             where d.lastCheckedAt < :checkedBefore
               and (coalesce(d.lastChangedAt, d.firstSeenAt) > :stableWindowStart

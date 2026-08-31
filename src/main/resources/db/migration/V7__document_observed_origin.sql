@@ -1,0 +1,58 @@
+-- Remembers which page a document's text was actually fetched from. Additive: one
+-- new column plus an index; nothing from V1..V6 is renamed or removed.
+--
+-- The bug (quietedit-cca.9): watson.ch republishes t-online copy and points
+-- rel=canonical at t-online.de, so the document is keyed by the t-online URL while
+-- its text came off watson.ch. The two ingest paths then asked for two different
+-- pages under one identity -- the feed path fetched the feed's link, the re-check
+-- path fetched the canonical URL -- and because the two publishers differ in
+-- orthography (groesste vs groosste, "" vs <<>>), the text alternated A/B/A/B and
+-- never settled. 94 of 405 stored versions were that artifact.
+--
+-- The decision this column records: the canonical URL stays identity, and the
+-- observed origin is tracked beside it.
+--
+-- The alternative was origin as identity, which would have split the syndicated copy
+-- into its own document. Rejected: canonical_url has been the unique key of document
+-- since V1 and dropping that uniqueness is not an additive change; "one article,
+-- identified by its canonical URL" is the domain's own definition of a document; and
+-- "two publishers, one story" is a clustering question, which the epic tracks
+-- separately (quietedit-v1m) rather than something identity should answer by
+-- duplicating rows.
+--
+-- Nullable, and null means "not recorded yet, so the canonical URL is the best guess
+-- of where the text came from" -- which is exactly right for every same-host document
+-- and is what the re-check path did for all of them before this column existed.
+-- Backfilling canonical_url would have been worse than leaving it null: for the
+-- syndicated documents it is the wrong page, and writing it would freeze the wrong
+-- answer in. Left null, the value is learned on the next run from the feed link that
+-- resolved to the document, which is the only place the truth is available.
+--
+-- Not unique: two feeds may legitimately carry two origins for one canonical URL.
+-- The first origin observed wins, and that limit is documented in DocumentRegistry.
+--
+-- Existing alternating documents are left as they are, on purpose and not marked.
+-- Their history cannot be cleaned -- trg_document_version_no_update and
+-- trg_document_version_no_delete reject UPDATE and DELETE on document_version, and
+-- dropping them would give up the append-only guarantee the whole store is built on
+-- -- and a marker would have to be a heuristic guess ("many versions, two distinct
+-- hashes") that nothing reads and that would also flag a genuine publish/correct/
+-- revert cycle. They stop growing after one more run and keep the versions they
+-- already have.
+--
+-- The stale article_attempt rows are left too. Once a document's origin is known, its
+-- re-check keys by that origin instead of by the canonical URL, so the canonical-keyed
+-- row is orphaned. It is inert: ArticleBudget ranks only the identities of the current
+-- run's candidates (IngestService.admit looks history up by candidate identity), so a
+-- row no candidate keys by never ranks anything. Deleting them here is not possible
+-- anyway -- at migration time no origin is recorded, so there is nothing to tell an
+-- orphan from a live row.
+--
+-- The ticket (quietedit-cca.9) names Flyway V7.
+alter table document
+    add column observed_origin_url text;
+
+-- A run resolves a whole poll's feed links against this column in one query, so that
+-- a document whose canonical URL belongs to another publisher is still recognised
+-- from the link its own feed advertises.
+create index idx_document_observed_origin_url on document (observed_origin_url);
