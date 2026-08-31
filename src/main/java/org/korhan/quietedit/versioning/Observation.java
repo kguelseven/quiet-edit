@@ -14,9 +14,15 @@ import java.util.Objects;
  * history into two. {@link VersionStore} computes it from {@code content}.
  *
  * <p>{@code publishedAt} is nullable and {@code publishedAtExact} says whether it
- * was read verbatim or inferred. Ingest passes null for both today: the feed's date
- * text is still unparsed, and turning it into an instant is date normalisation's
- * decision, not this store's.
+ * was read verbatim or inferred. Both come from date normalisation in ingest, which
+ * owns every assumption behind them -- an assumed timezone, a bare date, a date so
+ * far in the future that the retrieval time replaced it. The store writes them down
+ * and forms no opinion of its own.
+ *
+ * <p>Only the publication date travels here. A feed's {@code updated} date is a
+ * statement about the publisher's own record-keeping, and this system decides that
+ * a document changed by comparing the text it fetched, never by believing a claim
+ * in the feed.
  */
 public record Observation(
         Instant fetchedAt,
@@ -31,11 +37,8 @@ public record Observation(
     public Observation {
         Objects.requireNonNull(fetchedAt, "fetchedAt");
         Objects.requireNonNull(content, "content");
-    }
-
-    /** What ingest knows today: no publication date, because nothing has parsed one yet. */
-    public static Observation of(Instant fetchedAt, ArticleContent content, int httpStatus,
-                                 String feedTitle, String rawHtmlRef, EncodingVerdict encoding) {
-        return new Observation(fetchedAt, content, httpStatus, feedTitle, rawHtmlRef, null, true, encoding);
+        if (publishedAt == null && publishedAtExact) {
+            throw new IllegalArgumentException("A publication date that is absent cannot be exact");
+        }
     }
 }

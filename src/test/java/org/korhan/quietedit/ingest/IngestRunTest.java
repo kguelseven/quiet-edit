@@ -33,6 +33,7 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 
@@ -188,6 +189,10 @@ class IngestRunTest {
         assertThat(version.getRawHtmlRef()).isEqualTo(ingested.rawHtmlRef());
         assertThat(version.getHttpStatus()).isEqualTo(200);
         assertThat(version.getEncoding()).isEqualTo(ingested.encoding());
+        // The feed's pubDate reached the row as an instant in UTC, and as an exact one:
+        // the publisher wrote a real offset, so nothing had to be assumed.
+        assertThat(version.getPublishedAt()).isEqualTo(Instant.parse("2026-08-24T05:14:00Z"));
+        assertThat(version.isPublishedAtExact()).isTrue();
         assertThat(ingested.versionId()).isEqualTo(version.getId());
         assertThat(ingested.versionNumber()).isEqualTo(1);
     }

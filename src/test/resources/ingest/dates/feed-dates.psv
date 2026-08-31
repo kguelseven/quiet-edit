@@ -1,0 +1,43 @@
+# Date texts as real feeds write them, and the instant each must normalise to.
+# Format: <raw feed date> | <expected instant, or '-' for none> | <exact> | <what this row pins down>
+# The retrieval time for every row is 2026-08-18T09:00:00Z.
+# '#' starts a comment line; blank lines are ignored.
+
+# --- RFC 822 / RFC 2822, the RSS 2.0 family ---
+Tue, 18 Aug 2026 07:14:00 +0200 | 2026-08-18T05:14:00Z | true | the textbook RSS 2.0 date with a numeric offset
+Tue, 18 Aug 2026 05:14:00 GMT | 2026-08-18T05:14:00Z | true | GMT as the zone, which RFC 822 spells alphabetically
+18 Aug 2026 05:14:00 GMT | 2026-08-18T05:14:00Z | true | day-of-week omitted, which RFC 2822 permits
+Tue 18 Aug 2026 05:14:00 GMT | 2026-08-18T05:14:00Z | true | day-of-week without its comma
+Tue, 18 Aug 2026 05:14 GMT | 2026-08-18T05:14:00Z | true | seconds omitted
+Tue, 18 Aug 26 05:14:00 GMT | 2026-08-18T05:14:00Z | true | two-digit year, as RFC 822 originally wrote it
+Wed, 5 Aug 2026 09:04:00 +0100 | 2026-08-05T08:04:00Z | true | single-digit day of month
+Tue, 18 Aug 2026 01:14:00 EDT | 2026-08-18T05:14:00Z | true | a North American zone abbreviation
+Mon, 17 Aug 2026 22:14:00 PDT | 2026-08-18T05:14:00Z | true | a summer-time abbreviation crossing midnight UTC
+Tue, 18 Aug 2026 05:14:00 UT | 2026-08-18T05:14:00Z | true | RFC 822's bare UT
+Tue, 18 Aug 2026 07:14:00 +0200 (CEST) | 2026-08-18T05:14:00Z | true | RFC 2822 trailing comment after the offset
+Tue, 18 Aug 2026 07:14:00 GMT+0200 | 2026-08-18T05:14:00Z | true | offset written with a redundant GMT prefix
+tue, 18 aug 2026 05:14:00 gmt | 2026-08-18T05:14:00Z | true | lowercase month and day names
+Tue, 18 Aug 2026 07:14:00 +02:00 | 2026-08-18T05:14:00Z | true | RSS date carrying an ISO-style offset
+
+# --- ISO 8601 / RFC 3339, the Atom family ---
+2026-08-18T06:02:00Z | 2026-08-18T06:02:00Z | true | the textbook Atom date
+2026-08-17T18:05:00+02:00 | 2026-08-17T16:05:00Z | true | offset with a colon
+2026-08-18T06:02:00+0200 | 2026-08-18T04:02:00Z | true | offset without a colon
+2026-08-18T06:02:00+02 | 2026-08-18T04:02:00Z | true | hour-only offset
+2026-08-18T06:02:00.123Z | 2026-08-18T06:02:00.123Z | true | fractional seconds
+2026-08-18T06:02Z | 2026-08-18T06:02:00Z | true | seconds omitted
+
+# --- Incomplete: parsed, but never exact ---
+2026-08-18T06:02:00 | 2026-08-18T06:02:00Z | false | no timezone, so UTC is assumed
+2026-08-18 06:02:00 | 2026-08-18T06:02:00Z | false | a space where ISO 8601 wants a T, and still no zone
+2026-08-18 | 2026-08-18T00:00:00Z | false | a bare date, read as the start of its day
+Tue, 18 Aug 2026 05:14:00 MEZ | 2026-08-18T05:14:00Z | false | an invented zone abbreviation is dropped, not trusted
+Tue, 18 Aug 2026 05:14:00 | 2026-08-18T05:14:00Z | false | RSS date with the zone missing entirely
+
+# --- The future ---
+2026-08-18T09:45:00Z | 2026-08-18T09:45:00Z | true | 45 minutes ahead is ordinary clock skew and is believed
+2027-01-01T00:00:00Z | 2026-08-18T09:00:00Z | false | months ahead is discarded for the retrieval time
+
+# --- Nothing usable ---
+heute, 12 Uhr | - | false | prose is not a date
+18/08/2026 | - | false | an ambiguous numeric format is refused rather than guessed
