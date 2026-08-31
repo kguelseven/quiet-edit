@@ -90,12 +90,17 @@ import java.util.regex.Pattern;
  *   <li>The vocabulary is curated (English and German) and will miss a newsroom
  *       that names its furniture differently. The failure is visible rather than
  *       silent: the extra block shows up in the extraction fixture.</li>
- *   <li>A ticker or liveblog whose last entries carry a headline but no body loses
- *       those headlines to the trailing-heading rule, which cannot tell them from
- *       the caption of an emptied rail. Measured on the stored captures this costs
- *       four of forty-four blocks on a watson.ch transfer ticker, and nothing on
- *       any other page; the loss is deterministic, so it hides a later edit to
- *       those headlines rather than inventing one.</li>
+ *   <li>A ticker's newest entries are told from an emptied rail's caption by the
+ *       heading shape the page reuses for entries that do carry prose, so a rail
+ *       caption a publisher styles exactly like its body subheadings survives.
+ *       Measured over the stored captures this keeps one such caption per page on
+ *       one watson.ch layout and costs nothing anywhere else. It is furniture that
+ *       never changes, so it does not report an edit; it only lengthens the
+ *       revision.</li>
+ *   <li>A ticker entry's body reaches the extraction only when the publisher wraps
+ *       it in a prose block. watson.ch puts it in a {@code div}, so a transfer
+ *       ticker extracts to its entry headlines plus the embedded posts, and an edit
+ *       to an entry's text goes unnoticed. Tracked separately.</li>
  *   <li>The same vocabulary matched against a whole element name could remove real
  *       content: a body wrapper called {@code content-share-wrapper} names itself
  *       like furniture. Token matching (split on separators and camel-case
@@ -205,7 +210,8 @@ public class ArticleExtractor {
             "newsletter", "newsletter abonnieren", "sign up", "log in", "einloggen",
             "folgen sie uns", "follow us", "follow us on twitter",
             "alle rechte vorbehalten", "all rights reserved", "cookie-einstellungen",
-            "mehr informationen", "more information", "quelle", "source", "foto", "bild");
+            "mehr informationen", "more information", "quelle", "quellen", "source", "sources",
+            "foto", "bild");
 
     /**
      * Whitespace jsoup's own normalisation leaves in place -- non-breaking and
@@ -517,6 +523,7 @@ public class ArticleExtractor {
         Set<Element> selectable = new HashSet<>(blocks);
         List<String> paragraphs = new ArrayList<>();
         List<Boolean> heading = new ArrayList<>();
+        List<String> shape = new ArrayList<>();
         for (Element block : blocks) {
             if (hasProseDescendant(block, selectable)) {
                 continue;
@@ -524,11 +531,26 @@ public class ArticleExtractor {
             String text = normalize(block.text());
             if (keep(block, text) && !text.equals(title)) {
                 paragraphs.add(text);
-                heading.add(block.is(HEADINGS));
+                boolean isHeading = block.is(HEADINGS);
+                heading.add(isHeading);
+                shape.add(isHeading ? headingShape(block) : "");
             }
         }
-        dropTrailingHeadings(paragraphs, heading);
+        dropTrailingHeadings(paragraphs, heading, shape);
         return paragraphs;
+    }
+
+    /**
+     * How a page styles one heading, as an equality key: the tag plus the verbatim
+     * class attribute. Two headings share a shape when the page renders them the
+     * same way, which is as close to "these are the same kind of heading" as markup
+     * gets without naming a publisher. The class attribute is used as it stands
+     * rather than as a token set, because a set would have to be ordered before it
+     * could be compared and ordering it by anything but the source would make the
+     * key depend on a hash iteration -- see the determinism note on this class.
+     */
+    private String headingShape(Element block) {
+        return block.normalName() + "|" + block.className();
     }
 
     /**
@@ -538,7 +560,7 @@ public class ArticleExtractor {
      * gone. Matching them by name would need one entry per publisher, while the
      * shape -- heading, then no prose -- is the same everywhere and needs none.
      *
-     * <p>Three guards keep this from eating article text.
+     * <p>Four guards keep this from eating article text.
      * <ul>
      *   <li>Only <em>trailing</em> headings qualify. A heading in the middle of the
      *       body is followed by prose by definition, and a rail between two halves
@@ -552,13 +574,29 @@ public class ArticleExtractor {
      *       there is prose it could have labelled. A page that is mostly headings is
      *       a list and its headings are its content: a liveblog whose entry bodies
      *       load later leaves nothing but entry titles.</li>
+     *   <li>Only headings whose {@link #headingShape shape} the page does not also
+     *       use for a section that <em>does</em> carry prose. This is what keeps a
+     *       ticker's newest entries: watson.ch renders every entry title as the same
+     *       {@code h5.liveticker__entry__title}, so a trailing one whose body is
+     *       missing from the fetched HTML is still recognisably an entry title, while
+     *       NZZ's rail captions share a shape only with each other and with nothing
+     *       that has prose under it. Per shape rather than per page, so a ticker that
+     *       ends with rail captions still loses the captions and keeps the entries:
+     *       the backward scan drops captions until it reaches the first entry
+     *       title.</li>
      * </ul>
-     * What is left to lose is a short article that genuinely ends on a heading.
+     * What is left to lose is a short article that genuinely ends on a heading whose
+     * shape appears nowhere else on the page, and a rail caption a publisher happens
+     * to style exactly like its body subheadings.
      */
-    private void dropTrailingHeadings(List<String> paragraphs, List<Boolean> heading) {
+    private void dropTrailingHeadings(List<String> paragraphs, List<Boolean> heading, List<String> shape) {
+        Set<String> labelsProse = shapesLabellingProse(heading, shape);
         int trailing = 0;
         for (int i = paragraphs.size() - 1; i >= 0; i--) {
             if (!heading.get(i) || paragraphs.get(i).length() > MAX_LABEL_CHARS) {
+                break;
+            }
+            if (labelsProse.contains(shape.get(i))) {
                 break;
             }
             trailing++;
@@ -573,6 +611,22 @@ public class ArticleExtractor {
             return;
         }
         paragraphs.subList(paragraphs.size() - trailing, paragraphs.size()).clear();
+    }
+
+    /**
+     * The heading shapes the page uses to introduce prose: a shape qualifies once
+     * any heading carrying it is immediately followed by a paragraph. One witness is
+     * enough -- a shape used for content anywhere on the page is a content shape,
+     * and a ticker only ever offers one witness per entry.
+     */
+    private Set<String> shapesLabellingProse(List<Boolean> heading, List<String> shape) {
+        Set<String> shapes = new HashSet<>();
+        for (int i = 0; i < heading.size() - 1; i++) {
+            if (heading.get(i) && !heading.get(i + 1)) {
+                shapes.add(shape.get(i));
+            }
+        }
+        return shapes;
     }
 
     private boolean hasProseDescendant(Element block, Set<Element> selectable) {

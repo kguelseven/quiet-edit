@@ -28,7 +28,8 @@ class ArticleExtractorTest {
             "paywall-stub",         // headline but no prose at all
             "entity-noise",         // non-breaking spaces, soft hyphens, zero-width characters
             "nzz-rails-fetch1",     // real capture: furniture named only by data-* attributes
-            "nzz-rails-fetch2");    // the same article one fetch later, different rails
+            "nzz-rails-fetch2",     // the same article one fetch later, different rails
+            "watson-ticker");       // real capture: a ticker whose last entries end on a heading
 
     private final ArticleExtractor extractor = new ArticleExtractor();
 
@@ -239,6 +240,55 @@ class ArticleExtractorTest {
 
         assertThat(extractor.extract(article).paragraphs()).hasSize(2);
         assertThat(extractor.extract(liveblog).paragraphs()).hasSize(3);
+    }
+
+    /**
+     * The ratio guard alone cannot separate a ticker's newest entries from a rail
+     * caption: both are a short trailing heading on a page that has prose. What
+     * separates them is that the ticker uses one heading shape for every entry, and
+     * the earlier entries do carry prose, while the caption's shape introduces prose
+     * nowhere. Both shapes appear here on one page, in the order a ticker page puts
+     * them: the entries end and the rails follow.
+     */
+    @Test
+    @DisplayName("a trailing entry headline stays where a rail caption of its own shape goes")
+    void aHeadingShapeUsedForContentSurvivesAtTheEnd() {
+        String ticker = """
+                <article>
+                  <h3 class="entry__title">Bouaddi wechselt zu ManCity</h3>
+                  <p>Der Mittelfeldspieler kostet 95 Millionen Euro und unterschreibt bis 2031.</p>
+                  <h3 class="entry__title">Palhinha verlässt Bayern</h3>
+                  <p>Der Portugiese kehrt nach zwei Jahren in die Premier League zurück.</p>
+                  <h3 class="entry__title">Bremen holt Füllkrug zurück</h3>
+                  <h3 class="entry__title">Junger Spanier für die Grasshoppers</h3>
+                  <h2 class="container__title">Mehr zum Thema Transfers</h2>
+                </article>
+                """;
+
+        assertThat(extractor.extract(ticker).paragraphs()).containsExactly(
+                "Bouaddi wechselt zu ManCity",
+                "Der Mittelfeldspieler kostet 95 Millionen Euro und unterschreibt bis 2031.",
+                "Palhinha verlässt Bayern",
+                "Der Portugiese kehrt nach zwei Jahren in die Premier League zurück.",
+                "Bremen holt Füllkrug zurück",
+                "Junger Spanier für die Grasshoppers");
+    }
+
+    /**
+     * The four entry headlines quietedit-10i.11 was about, on the capture that lost
+     * them. Spelled out next to the goldset because the goldset would still pass with
+     * them missing from both sides of the comparison.
+     */
+    @Test
+    @DisplayName("a ticker capture keeps the entries its last headlines belong to")
+    void tickerEntryHeadlinesReachTheRevision() {
+        ArticleContent content = extractor.extract(fixture("watson-ticker.html"));
+
+        assertThat(content.paragraphs()).endsWith(
+                "Patrick Vieira neuer Nationaltrainer des Senegal",
+                "Luzern holt wohl neue Nummer 1",
+                "Junger Spanier für die Grasshoppers",
+                "Bremen holt Füllkrug zurück");
     }
 
     private ArticleContent expected(String source) {
