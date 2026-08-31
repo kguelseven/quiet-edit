@@ -8,8 +8,12 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Answers the two questions a person has when looking for a silent edit: which
- * articles changed, and what changed in one of them.
+ * Answers the questions a person has when looking for a silent edit: which articles
+ * changed, which revisions one of them has, and what changed between two of those.
+ *
+ * <p>The revision listing is what makes the diff endpoint navigable. Without it the
+ * only way to find the pair worth opening is to diff every adjacent pair in turn,
+ * because nothing else reveals when a revision was fetched or what it hashed to.
  *
  * <h2>Computed per request, not stored</h2>
  * A diff is a pure function of two immutable rows, and both rows are complete: the
@@ -61,6 +65,27 @@ public class DiffService {
     @Transactional(readOnly = true)
     public List<DocumentHistorySummary> changedDocuments(int limit) {
         return documents.changedDocuments(Limit.of(Math.clamp(limit, 1, MAX_LISTING_LIMIT)));
+    }
+
+    /**
+     * Every revision of one document, oldest first.
+     *
+     * <p>No limit and no paging, matching the repository: a history is bounded by how
+     * often one article was really edited, which is a handful of rows and not a page
+     * size. The rows themselves stay small because the response carries no version
+     * text -- see {@code DiffController.Revision}.
+     *
+     * @throws DiffUnavailableException if there is no document with that id. A
+     *                                 document observed only once is not an error
+     *                                 here: one revision is a truthful history, and
+     *                                 it is the diff that needs a pair, not this
+     */
+    @Transactional(readOnly = true)
+    public DocumentRevisions revisions(UUID documentId) {
+        Document document = documents.findById(documentId)
+                .orElseThrow(() -> new DiffUnavailableException(
+                        DiffUnavailableException.Reason.UNKNOWN_DOCUMENT, "No document " + documentId));
+        return new DocumentRevisions(document, versions.findByDocumentIdOrderByVersionNumberAsc(documentId));
     }
 
     /**
