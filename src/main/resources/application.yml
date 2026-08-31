@@ -29,7 +29,7 @@ quietedit:
       # The timer only calls runOnce(); the same run is reachable via POST /api/ingest/run.
       enabled: ${QUIETEDIT_SCHEDULE_ENABLED:true}
       # Fixed delay, measured from the end of the previous run.
-      interval: ${QUIETEDIT_SCHEDULE_INTERVAL:5m}
+      interval: ${QUIETEDIT_SCHEDULE_INTERVAL:30s}
     run:
       # Ceiling on the articles one run may fetch. Nothing above it is lost: the
       # next run takes the least recently fetched candidates first.
@@ -39,7 +39,7 @@ quietedit:
       # after this fraction of the article's age, so attention decays the way a
       # newsroom's does. The reasoning is in RecheckPolicy.
       age-factor: 0.25
-      min-interval: 10m
+      min-interval: 2m
       max-interval: 12h
       # A stable article is watched this long after the last thing that happened
       # to it; every observed edit buys another window, up to max-window-factor.
