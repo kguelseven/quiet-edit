@@ -1,0 +1,7 @@
+# The article as first observed. Line 1 after the comments is the title,
+# every further non-blank line is one paragraph, in reading order.
+Bundesrat vertagt die Entscheidung zum Netzausbau
+Der Bundesrat hat die Entscheidung über den Netzausbau erneut vertagt.
+Die Länder fordern einen Ausgleich für die Kosten der neuen Trassen.
+„Ohne Ausgleich gibt es keine Zustimmung“, sagte die Ministerpräsidentin.
+Eine neue Sitzung ist für den kommenden Monat angesetzt.
