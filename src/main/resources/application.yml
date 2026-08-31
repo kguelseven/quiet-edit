@@ -78,6 +78,12 @@ quietedit:
       # Raw HTML lives outside the database; only the ref is persisted.
       storage-root: ${QUIETEDIT_RAW_HTML_DIR:./data/raw-html}
 
+  # The reading interface renders every timestamp in this zone; the stored instants
+  # are UTC. The reader's zone, not the JVM's, so a container on UTC does not change
+  # what the pages say.
+  web:
+    zone: ${QUIETEDIT_DISPLAY_ZONE:Europe/Zurich}
+
 server:
   port: ${QUIETEDIT_PORT:8080}
 

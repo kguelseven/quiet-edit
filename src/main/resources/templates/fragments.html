@@ -25,9 +25,15 @@
     ></th:block
 ></span>
 
+<!--
+  The zone is named once, here, because every timestamp on every page is rendered in
+  it: the stored instants are UTC, and a local time without its zone is only readable
+  by someone who already knows which one was chosen.
+-->
 <header th:fragment="masthead" class="masthead">
     <a class="wordmark" th:href="@{/}">quietedit</a>
     <span class="tagline">silent edits to news articles</span>
+    <span class="zone muted" th:text="|times in ${@timestamps.zone()}|">times in UTC</span>
 </header>
 
 </body>
