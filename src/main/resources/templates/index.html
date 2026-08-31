@@ -5,39 +5,60 @@
 <header th:replace="~{fragments :: masthead}"></header>
 
 <main>
-    <!-- GET, so every filtered listing is a URL that can be linked and cited. -->
-    <form class="filters" method="get" th:action="@{/}">
-        <label>
-            <span>Feed</span>
-            <select name="feed">
-                <option value="" th:selected="${view.filter.feedId == null}">All feeds</option>
-                <option th:each="feed : ${view.feeds}"
-                        th:value="${feed.id}"
-                        th:text="${feed.name}"
-                        th:selected="${feed.id == view.filter.feedId}"></option>
-            </select>
-        </label>
-        <label>
-            <span>Changed</span>
-            <select name="within">
-                <option th:each="window : ${windows}"
-                        th:value="${window.name()}"
-                        th:text="${window.label()}"
-                        th:selected="${window == view.filter.within}"></option>
-            </select>
-        </label>
-        <label>
-            <span>Min. revisions</span>
-            <input type="number" name="minRevisions" min="2" step="1"
-                   th:value="${view.filter.minRevisions}">
-        </label>
-        <label class="check">
-            <input type="checkbox" name="rewrittenOnly" value="true"
-                   th:checked="${view.filter.rewrittenOnly}">
-            <span>Rewritten in place only</span>
-        </label>
-        <button type="submit">Show</button>
-    </form>
+    <div class="controls">
+        <!-- GET, so every filtered listing is a URL that can be linked and cited. -->
+        <form class="filters" method="get" th:action="@{/}">
+            <label>
+                <span>Feed</span>
+                <select name="feed">
+                    <option value="" th:selected="${view.filter.feedId == null}">All feeds</option>
+                    <option th:each="feed : ${view.feeds}"
+                            th:value="${feed.id}"
+                            th:text="${feed.name}"
+                            th:selected="${feed.id == view.filter.feedId}"></option>
+                </select>
+            </label>
+            <label>
+                <span>Changed</span>
+                <select name="within">
+                    <option th:each="window : ${windows}"
+                            th:value="${window.name()}"
+                            th:text="${window.label()}"
+                            th:selected="${window == view.filter.within}"></option>
+                </select>
+            </label>
+            <label>
+                <span>Min. revisions</span>
+                <input type="number" name="minRevisions" min="2" step="1"
+                       th:value="${view.filter.minRevisions}">
+            </label>
+            <label class="check">
+                <input type="checkbox" name="rewrittenOnly" value="true"
+                       th:checked="${view.filter.rewrittenOnly}">
+                <span>Rewritten in place only</span>
+            </label>
+            <button type="submit">Show</button>
+        </form>
+
+        <!-- Outside the form on purpose: these are totals for the whole feed, not part of
+             the filtered result, and they stay put when a filter is applied.
+             Fetch times are rendered in the server's zone, which is where the person
+             reading this page and the scheduler that produced the stamp both are. -->
+        <aside class="coverage">
+            <h2>Feeds</h2>
+            <ul>
+                <li th:each="feed : ${view.coverage}">
+                    <span class="name" th:text="${feed.name}">feed</span>:
+                    <span th:text="${feed.documents}">0</span> articles
+                    <span class="muted" th:if="${feed.lastFetchedAt != null}">
+                        (last fetched <span th:text="${#temporals.format(feed.lastFetchedAt, 'dd.MM.yyyy HH:mm')}">never</span>)
+                    </span>
+                    <span class="muted" th:if="${feed.lastFetchedAt == null}">(never fetched)</span>
+                </li>
+                <li th:if="${#lists.isEmpty(view.coverage)}" class="muted">No feeds subscribed.</li>
+            </ul>
+        </aside>
+    </div>
 
     <p class="count">
         <span th:text="${#lists.size(view.rows)}">0</span> articles

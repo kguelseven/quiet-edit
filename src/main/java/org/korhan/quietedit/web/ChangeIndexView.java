@@ -1,5 +1,7 @@
 package org.korhan.quietedit.web;
 
+import org.korhan.quietedit.ingest.FeedCoverage;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -15,13 +17,17 @@ import java.util.UUID;
  *                dropped silently: "no results" and "twelve results, all tickers" are
  *                different answers
  * @param capped  true when the query returned a full page, so there may be more
+ * @param coverage what each of the busiest feeds has produced in total. Deliberately
+ *                 unfiltered: it answers "is anything arriving at all", which a figure
+ *                 that moved with the filters could not
  */
 public record ChangeIndexView(
         List<Row> rows,
         List<FeedOption> feeds,
         ChangeFilter filter,
         int hidden,
-        boolean capped) {
+        boolean capped,
+        List<FeedCoverage> coverage) {
 
     /**
      * One document in the listing.
