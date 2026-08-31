@@ -80,6 +80,13 @@ import java.util.stream.Stream;
  * document a feed still advertises is offered once, by the feed, so that the entry's
  * dates and title are not thrown away.
  *
+ * <p>Both sources key a candidate by the page they will ask for, not by the document's
+ * identity, and that is what makes "offered once" hold. The two are the same string
+ * for an article that declares itself canonical and two different publishers' URLs for
+ * a syndicated copy, so keying the store's half by identity let one document arrive as
+ * two candidates fetching two pages -- and since the two publishers' renderings differ,
+ * every run then appended a revision reporting an edit nobody made.
+ *
  * <p>The {@link EncodingVerdict} travels with the article all the way into that
  * store. This is the only stage that knows how the bytes were decoded, so dropping
  * it here would mean reconstructing at classification time a fact that was certain
@@ -258,7 +265,11 @@ public class IngestService {
         for (DocumentObservation observation : stored) {
             // A document a feed still advertises is already a candidate, and that
             // candidate is the better one: it carries the entry's dates and title.
-            if (known.putIfAbsent(observation.canonicalUrl(), observation) == null) {
+            // Keyed by the page the text came from rather than by identity, because
+            // that is the string a feed candidate's provisional identity can equal --
+            // under syndication the two are different publishers' URLs, and keying by
+            // identity here let the same document be fetched from both in one run.
+            if (known.putIfAbsent(observation.fetchUrl(), observation) == null) {
                 work.offer(observation);
             }
         }
@@ -600,7 +611,8 @@ public class IngestService {
         ArticleFetchResult fetch = attempt.fetch();
         DocumentRegistry.Registration registration;
         try {
-            registration = documents.register(attempt.canonicalUrl(), candidate.feedId(), fetch.fetchedAt());
+            registration = documents.register(attempt.canonicalUrl(), candidate.identity(),
+                    candidate.feedId(), fetch.fetchedAt());
         } catch (RuntimeException e) {
             log.error("Could not register {}", attempt.canonicalUrl(), e);
             return ArticleIngestResult.failed(candidate.link(), fetch.finalUrl(),
@@ -725,14 +737,24 @@ public class IngestService {
         private final List<ArticleIngestResult> articles = new ArrayList<>();
 
         /**
-         * The document's canonical URL serves as link and identity at once. It is what
-         * the store is keyed by and what the attempt log will key by, and unlike a feed
-         * link it needs no provisional resolution -- it is already the real identity.
+         * The document's observed origin serves as link and identity at once, and it is
+         * already canonicalised, so unlike a feed link it needs no provisional
+         * resolution.
+         *
+         * <p>The origin and not the canonical URL, which is the fix for
+         * quietedit-cca.9: a syndicated copy is filed under the original publisher's
+         * canonical URL, so re-checking that URL fetched a page whose text this
+         * document had never carried, reported a change nobody made, and reported the
+         * opposite change on the next run. The re-check has to ask for the page the
+         * text was read from.
+         *
+         * <p>It is also the identity the attempt log keys by, which is what makes the
+         * two candidate sources collide in one run instead of passing each other.
          */
         void offer(DocumentObservation observation) {
             articles.add(null);
             candidates.add(new Candidate(this, articles.size() - 1, observation.feedId(),
-                    observation.canonicalUrl(), observation.canonicalUrl(), null, null, null));
+                    observation.fetchUrl(), observation.fetchUrl(), null, null, null));
         }
 
         @Override

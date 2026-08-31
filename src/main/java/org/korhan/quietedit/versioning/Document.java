@@ -19,6 +19,10 @@ import java.util.UUID;
  * dragging a lazy proxy through the append-only version store. The foreign key
  * itself is enforced in the schema.
  *
+ * <p>The canonical URL is identity; {@code observedOriginUrl} is where the text was
+ * read. The two differ only under syndication, and keeping both is what stops a
+ * syndicated copy from being asked for at two addresses under one identity.
+ *
  * <p>{@code versionCount} and {@code lastChangedAt} are denormalised counters
  * maintained by the version store, not derived on read: the re-check policy has
  * to rank thousands of documents by staleness without aggregating over every
@@ -37,6 +41,19 @@ public class Document {
 
     @Column(name = "feed_id", nullable = false)
     private UUID feedId;
+
+    /**
+     * The page this document's text was actually fetched from, already canonicalised
+     * so that it compares equal to the identity a feed link resolves to before any
+     * fetch. Equal to {@code canonicalUrl} for every article that declares itself
+     * canonical, and different exactly where a publisher syndicates another's copy.
+     *
+     * <p>Null until the first run that resolves the document records it. Null means
+     * "unknown, so the canonical URL is the best guess", which is what every re-check
+     * assumed before this column existed.
+     */
+    @Column(name = "observed_origin_url")
+    private String observedOriginUrl;
 
     @Column(name = "first_seen_at", nullable = false)
     private Instant firstSeenAt;
@@ -80,6 +97,14 @@ public class Document {
 
     public void setFeedId(UUID feedId) {
         this.feedId = feedId;
+    }
+
+    public String getObservedOriginUrl() {
+        return observedOriginUrl;
+    }
+
+    public void setObservedOriginUrl(String observedOriginUrl) {
+        this.observedOriginUrl = observedOriginUrl;
     }
 
     public Instant getFirstSeenAt() {
