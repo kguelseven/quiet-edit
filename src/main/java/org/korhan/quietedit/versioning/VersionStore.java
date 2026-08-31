@@ -1,7 +1,5 @@
 package org.korhan.quietedit.versioning;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,12 +34,11 @@ import java.util.UUID;
  *
  * <p>Comparing against the newest revision only, rather than against the whole
  * history, is deliberate: history is a sequence of observations, and an article that
- * goes A, B, A really did change twice. The store cannot record that second change
- * today, because Flyway V1 made {@code (document_id, content_hash)} unique and the
- * returning text would collide with the row it returns to. That case is reported as
- * {@link VersionOutcome#REVERTED} rather than silently swallowed, and relaxing the
- * constraint is its own ticket (quietedit-cca.2) because widening it is not the
- * additive schema change this ticket is allowed to make.
+ * goes A, B, A really did change twice. Both moves are appended, so the third revision
+ * repeats the first one's content hash -- which is why Flyway V5 relaxed V1's unique
+ * {@code (document_id, content_hash)} to a plain index. A returning wording is the
+ * clearest signal this system has that an edit was reconsidered, and a store that
+ * refused to record it would be silent precisely where it matters most.
  *
  * <h2>The document counters</h2>
  * {@code versionCount} and {@code lastChangedAt} are written in the same transaction
@@ -57,8 +54,6 @@ import java.util.UUID;
  */
 @Service
 public class VersionStore {
-
-    private static final Logger log = LoggerFactory.getLogger(VersionStore.class);
 
     private final DocumentVersionRepository versions;
     private final DocumentRepository documents;
@@ -89,11 +84,6 @@ public class VersionStore {
 
         if (latest.isPresent() && latest.get().getContentHash().equals(contentHash)) {
             return Stored.unchanged(latest.get());
-        }
-        if (versions.existsByDocumentIdAndContentHash(documentId, contentHash)) {
-            log.warn("Document {} returned to text it already published; the revision cannot be stored "
-                    + "while (document_id, content_hash) is unique", documentId);
-            return Stored.reverted(latest.orElseThrow(), contentHash);
         }
         return Stored.appended(append(documentId, observation, contentHash, latest.orElse(null)),
                 latest.map(DocumentVersion::getId).orElse(null));
@@ -187,12 +177,6 @@ public class VersionStore {
         static Stored unchanged(DocumentVersion latest) {
             return new Stored(latest.getId(), latest.getVersionNumber(), latest.getContentHash(),
                     VersionOutcome.UNCHANGED, null);
-        }
-
-        /** Carries the hash that was not stored, so a log line can name what was lost. */
-        static Stored reverted(DocumentVersion latest, String contentHash) {
-            return new Stored(latest.getId(), latest.getVersionNumber(), contentHash,
-                    VersionOutcome.REVERTED, null);
         }
 
         public boolean appended() {

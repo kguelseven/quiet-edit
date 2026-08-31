@@ -399,6 +399,48 @@ class IngestRunTest {
         assertThat(history.getFirst().getParagraphs()).hasSize(2);
     }
 
+    /**
+     * A, B, A end to end: a headline that is changed and then changed back leaves three
+     * revisions, the third repeating the first one's content hash. This is the case the
+     * store could not record until Flyway V5, and it is the one an editor is most
+     * likely to produce -- publish, correct, revert after the correction is disputed.
+     */
+    @Test
+    void anArticleThatReturnsToItsEarlierWordingGainsAThirdRevision() {
+        server.stubFor(get("/broken.xml").willReturn(aResponse().withStatus(500)));
+        server.stubFor(get("/press.xml").willReturn(ok(feedBody("Press", "/steuerreform"))));
+        server.stubFor(get("/wire.xml").willReturn(ok(feedBody("Wire"))));
+
+        server.stubFor(get("/steuerreform").willReturn(articlePage("Steuerreform beschlossen")));
+        ingestService.runOnce();
+
+        server.stubFor(get("/steuerreform").willReturn(articlePage("Steuerreform gescheitert")));
+        ingestService.runOnce();
+
+        server.stubFor(get("/steuerreform").willReturn(articlePage("Steuerreform beschlossen")));
+        IngestRun third = ingestService.runOnce();
+
+        // Back to the first wording is a change like any other, not "unchanged".
+        assertThat(third.count(ArticleIngestOutcome.CHANGED)).isEqualTo(1);
+        assertThat(third.count(ArticleIngestOutcome.UNCHANGED)).isZero();
+        assertThat(article(third, "/steuerreform").versionNumber()).isEqualTo(3);
+        assertThat(article(third, "/steuerreform").reason()).isNull();
+
+        Document document = documents.findByCanonicalUrl(canonical("/steuerreform")).orElseThrow();
+        assertThat(document.getVersionCount()).isEqualTo(3);
+
+        List<DocumentVersion> history = versions.findByDocumentIdOrderByVersionNumberAsc(document.getId());
+        assertThat(history).extracting(DocumentVersion::getPageTitle).containsExactly(
+                "Steuerreform beschlossen", "Steuerreform gescheitert", "Steuerreform beschlossen");
+        assertThat(history.getLast().getContentHash()).isEqualTo(history.getFirst().getContentHash());
+        assertThat(history.getLast().getId()).isNotEqualTo(history.getFirst().getId());
+
+        // A fourth look at the unchanged page still adds nothing.
+        IngestRun fourth = ingestService.runOnce();
+        assertThat(fourth.count(ArticleIngestOutcome.UNCHANGED)).isEqualTo(1);
+        assertThat(versions.count()).isEqualTo(3);
+    }
+
     /** The endpoint is the same run, so it only has to agree with it. */
     @Test
     void theEndpointReportsTheSameRun() {
