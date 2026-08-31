@@ -45,12 +45,16 @@ a { color: var(--link); }
 .hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; word-break: break-all; }
 
 /* --- filters --- */
+/* The filter form and the coverage summary sit side by side and wrap under each other
+   on a narrow window. The form takes the space it needs; the summary takes the rest. */
+.controls { display: flex; flex-wrap: wrap; gap: 0.9rem; margin: 1.5rem 0 0.75rem; }
+
 .filters {
     display: flex;
     flex-wrap: wrap;
     align-items: flex-end;
     gap: 0.9rem;
-    margin: 1.5rem 0 0.75rem;
+    flex: 1 1 28rem;
     padding: 1rem;
     background: var(--card);
     border: 1px solid var(--rule);
@@ -66,6 +70,22 @@ a { color: var(--link); }
     font: inherit; padding: 0.4rem 1.1rem; border: 1px solid var(--ink);
     background: var(--ink); color: #fff; border-radius: 4px; cursor: pointer;
 }
+
+.coverage {
+    flex: 1 1 20rem;
+    padding: 1rem;
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    font-size: 0.8rem;
+}
+.coverage h2 {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--muted); margin: 0 0 0.4rem;
+}
+.coverage ul { list-style: none; margin: 0; padding: 0; }
+.coverage li { padding: 0.1rem 0; }
+.coverage .name { font-weight: 600; }
 
 .count { font-size: 0.85rem; color: var(--muted); margin: 0 0 1rem; }
 .empty { padding: 1rem; background: var(--card); border: 1px dashed var(--rule); border-radius: 6px; }

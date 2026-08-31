@@ -60,6 +60,13 @@ public class ChangeBrowserService {
      */
     static final int MAX_ROWS = 200;
 
+    /**
+     * How many feeds the coverage summary names. Five, because it is a glance beside the
+     * filters and not a second table: the busiest handful is what says whether articles
+     * are arriving, and a list of every subscribed source would be scrolled past.
+     */
+    static final int SUMMARISED_FEEDS = 5;
+
     private final DocumentRepository documents;
     private final DocumentVersionRepository versions;
     private final FeedRepository feeds;
@@ -100,7 +107,7 @@ public class ChangeBrowserService {
             rows.add(row(row));
         }
         return new ChangeIndexView(List.copyOf(rows), feedOptions(), filter, hidden,
-                found.size() == MAX_ROWS);
+                found.size() == MAX_ROWS, feeds.coverage(Limit.of(SUMMARISED_FEEDS)));
     }
 
     /**
