@@ -1,0 +1,8 @@
+# The same article after a CMS change: straight quotes, re-wrapped whitespace,
+# and a fresh ad slot block between two paragraphs.
+Bundesrat vertagt die   Entscheidung zum Netzausbau
+Der Bundesrat hat die Entscheidung über den Netzausbau erneut vertagt.
+Die Länder fordern  einen Ausgleich für die Kosten der neuen Trassen.
+adSlotId=div-gpt-ad-1712345678901-0
+"Ohne Ausgleich gibt es keine Zustimmung", sagte die Ministerpräsidentin.
+Eine neue Sitzung ist für den kommenden Monat angesetzt.
