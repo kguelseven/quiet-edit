@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('no diff available')}"></head>
+<body>
+<header th:replace="~{fragments :: masthead}"></header>
+<main>
+    <h1>No diff available</h1>
+    <p class="empty" th:text="${detail}">reason</p>
+    <p class="muted" th:text="${reason}">token</p>
+    <p><a th:href="@{/}">&larr; all changed articles</a></p>
+</main>
+</body>
+</html>

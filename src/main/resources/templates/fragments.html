@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<!--
+  Shared pieces of both pages. No layout dialect: plain Thymeleaf fragments keep the
+  dependency list at one starter, which is what "no additional build step" means here.
+-->
+<head th:fragment="head(title)">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title th:text="|quietedit - ${title}|">quietedit</title>
+    <link rel="stylesheet" th:href="@{/quietedit.css}">
+</head>
+<body>
+
+<!--
+  A run of marked and unmarked segments. The space between two segments is template
+  text outside the span, so a highlight never covers the space after it, and every
+  piece of article text goes through th:text and is escaped.
+-->
+<span th:fragment="marked(segments)" class="marked"
+    ><th:block th:each="segment,i : ${segments}"
+        ><th:block th:unless="${i.first}"> </th:block
+        ><span th:if="${segment.marked}" class="mark" th:text="${segment.text}"></span
+        ><th:block th:unless="${segment.marked}" th:text="${segment.text}"></th:block
+    ></th:block
+></span>
+
+<header th:fragment="masthead" class="masthead">
+    <a class="wordmark" th:href="@{/}">quietedit</a>
+    <span class="tagline">silent edits to news articles</span>
+</header>
+
+</body>
+</html>

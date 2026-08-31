@@ -1,0 +1,131 @@
+/*
+ * One stylesheet, served straight from the classpath. No preprocessor and no bundler:
+ * the point of the page is reading, and a build step would buy nothing it needs.
+ */
+:root {
+    --ink: #1a1a1a;
+    --muted: #6b6b6b;
+    --rule: #dcdcdc;
+    --page: #fbfbf9;
+    --card: #ffffff;
+    --removed: #b3261e;
+    --removed-bg: #fdecea;
+    --added: #1b5e20;
+    --added-bg: #e8f5e9;
+    --link: #14507d;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    padding: 0 1.5rem 4rem;
+    background: var(--page);
+    color: var(--ink);
+    font: 16px/1.55 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+main { max-width: 62rem; margin: 0 auto; }
+
+a { color: var(--link); }
+
+.masthead {
+    max-width: 62rem;
+    margin: 0 auto;
+    padding: 1.25rem 0;
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    border-bottom: 1px solid var(--rule);
+}
+.wordmark { font-weight: 700; font-size: 1.15rem; text-decoration: none; letter-spacing: -0.01em; }
+.tagline { color: var(--muted); font-size: 0.85rem; }
+
+.muted { color: var(--muted); }
+.hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; word-break: break-all; }
+
+/* --- filters --- */
+.filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.9rem;
+    margin: 1.5rem 0 0.75rem;
+    padding: 1rem;
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+}
+.filters label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; color: var(--muted); }
+.filters label.check { flex-direction: row; align-items: center; gap: 0.4rem; padding-bottom: 0.4rem; }
+.filters select, .filters input[type=number] {
+    font: inherit; padding: 0.35rem 0.4rem; border: 1px solid var(--rule); border-radius: 4px; background: #fff;
+}
+.filters input[type=number] { width: 6rem; }
+.filters button {
+    font: inherit; padding: 0.4rem 1.1rem; border: 1px solid var(--ink);
+    background: var(--ink); color: #fff; border-radius: 4px; cursor: pointer;
+}
+
+.count { font-size: 0.85rem; color: var(--muted); margin: 0 0 1rem; }
+.empty { padding: 1rem; background: var(--card); border: 1px dashed var(--rule); border-radius: 6px; }
+
+/* --- listing --- */
+.listing { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--rule); }
+.listing th, .listing td { text-align: left; padding: 0.6rem 0.7rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.listing th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.listing td.num, .listing th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.listing tr:last-child td { border-bottom: none; }
+.article a { font-weight: 600; text-decoration: none; }
+.article a:hover { text-decoration: underline; }
+.article .source, .source a { display: block; font-weight: 400; font-size: 0.72rem; color: var(--muted); word-break: break-all; }
+
+/* --- diff --- */
+.crumbs { margin: 1.25rem 0 0.5rem; font-size: 0.85rem; }
+h1 { font-size: 1.5rem; line-height: 1.25; margin: 0.5rem 0 0.35rem; }
+h2 { font-size: 0.95rem; margin: 0 0 0.5rem; }
+
+.revisions { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1.25rem 0; }
+.revisions .side {
+    flex: 1 1 18rem; padding: 0.85rem 1rem; background: var(--card);
+    border: 1px solid var(--rule); border-radius: 6px;
+}
+.revisions dl { display: grid; grid-template-columns: 6.5rem 1fr; gap: 0.15rem 0.5rem; margin: 0; font-size: 0.8rem; }
+.revisions dt { color: var(--muted); }
+.revisions dd { margin: 0; }
+
+.pairs { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; font-size: 0.8rem; margin-bottom: 1.5rem; }
+.pairs a {
+    padding: 0.15rem 0.5rem; border: 1px solid var(--rule); border-radius: 999px;
+    background: var(--card); text-decoration: none;
+}
+.pairs a.current { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+.change {
+    background: var(--card); border: 1px solid var(--rule); border-left: 3px solid var(--rule);
+    border-radius: 4px; padding: 0.75rem 1rem; margin: 0 0 0.75rem;
+}
+.change .meta { margin: 0 0 0.4rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.change .kind { font-weight: 700; }
+.change .pos { margin-left: 0.5rem; }
+.change p.before, .change p.after { margin: 0.25rem 0; }
+.change p.before { color: var(--removed); }
+.change p.after { color: var(--added); }
+.change p.before::before { content: "\2212\00a0"; color: var(--muted); }
+.change p.after::before { content: "+\00a0"; color: var(--muted); }
+
+.title-change { border-left-color: var(--ink); }
+.kind-CHANGED { border-left-color: #c77700; }
+.kind-ADDED { border-left-color: var(--added); }
+.kind-REMOVED { border-left-color: var(--removed); }
+.kind-MOVED { border-left-color: var(--muted); }
+/* A move rewrote nothing, so its text is shown as it stands rather than as an insert. */
+.kind-MOVED p.after { color: var(--ink); }
+.kind-MOVED p.after::before { content: "\21c4\00a0"; }
+/* An added or removed paragraph is wholly new or wholly gone; a second colour on top
+   of the row colour would say nothing the row does not already say. */
+.kind-ADDED .mark, .kind-REMOVED .mark { background: none; }
+
+.mark { padding: 0.05em 0.15em; border-radius: 2px; font-weight: 600; }
+.before .mark { background: var(--removed-bg); }
+.after .mark { background: var(--added-bg); }

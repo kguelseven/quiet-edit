@@ -1,0 +1,12 @@
+# The same ticker, but this time an entry body was genuinely corrected from 1300 to
+# 1400 while a new entry arrived. The index line rolled exactly as above, so the only
+# thing separating this revision from ticker-appended-v2.txt is the correction -- and
+# it is the correction that has to keep the row visible.
+Liveticker zur Sturzflut in Nepal
+Armee birgt zwei Vermisste ++ Keine Informationen zu Schweizer Opfern
+Armee birgt zwei Vermisste
+Die Armee hat im Distrikt Sindhupalchok zwei Vermisste geborgen.
+Keine Informationen zu Schweizer Opfern
+Das EDA hat bislang keine Kenntnis von betroffenen Schweizer Staatsangehörigen.
+Nepal: Zahl der Vermissten steigt auf über 1300
+Die Behörden in Kathmandu melden über 1400 Vermisste.

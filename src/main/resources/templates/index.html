@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('changed articles')}"></head>
+<body>
+<header th:replace="~{fragments :: masthead}"></header>
+
+<main>
+    <!-- GET, so every filtered listing is a URL that can be linked and cited. -->
+    <form class="filters" method="get" th:action="@{/}">
+        <label>
+            <span>Feed</span>
+            <select name="feed">
+                <option value="" th:selected="${view.filter.feedId == null}">All feeds</option>
+                <option th:each="feed : ${view.feeds}"
+                        th:value="${feed.id}"
+                        th:text="${feed.name}"
+                        th:selected="${feed.id == view.filter.feedId}"></option>
+            </select>
+        </label>
+        <label>
+            <span>Changed</span>
+            <select name="within">
+                <option th:each="window : ${windows}"
+                        th:value="${window.name()}"
+                        th:text="${window.label()}"
+                        th:selected="${window == view.filter.within}"></option>
+            </select>
+        </label>
+        <label>
+            <span>Min. revisions</span>
+            <input type="number" name="minRevisions" min="2" step="1"
+                   th:value="${view.filter.minRevisions}">
+        </label>
+        <label class="check">
+            <input type="checkbox" name="rewrittenOnly" value="true"
+                   th:checked="${view.filter.rewrittenOnly}">
+            <span>Rewritten in place only</span>
+        </label>
+        <button type="submit">Show</button>
+    </form>
+
+    <p class="count">
+        <span th:text="${#lists.size(view.rows)}">0</span> articles
+        <span th:if="${view.hidden > 0}" class="muted">
+            &middot; <span th:text="${view.hidden}">0</span> hidden as additions only
+        </span>
+        <span th:if="${view.capped}" class="muted">
+            &middot; listing capped, narrow the filters to see further back
+        </span>
+    </p>
+
+    <p th:if="${#lists.isEmpty(view.rows)}" class="empty">
+        Nothing matches. Either no article has been observed to change yet, or the
+        filters are narrower than the data.
+    </p>
+
+    <table th:unless="${#lists.isEmpty(view.rows)}" class="listing">
+        <thead>
+        <tr>
+            <th>Article</th>
+            <th>Host</th>
+            <th class="num">Revisions</th>
+            <th>Last changed</th>
+            <th class="num">Paragraphs</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="row : ${view.rows}">
+            <td class="article">
+                <a th:href="@{/documents/{id}/diff(id=${row.documentId},from=${row.fromVersion},to=${row.toVersion})}"
+                   th:text="${row.title} ?: '(no headline extracted)'">headline</a>
+                <a class="source" th:href="${row.canonicalUrl}" rel="noreferrer noopener"
+                   target="_blank" th:text="${row.canonicalUrl}">url</a>
+            </td>
+            <td th:text="${row.host}">host</td>
+            <td class="num" th:text="${row.revisions}">0</td>
+            <td th:text="${row.lastChangedAt}">never</td>
+            <!-- Paragraph count of the newest revision: a low one is what a paywalled
+                 excerpt or a ticker without entry bodies looks like. -->
+            <td class="num" th:text="${row.paragraphs}">0</td>
+        </tr>
+        </tbody>
+    </table>
+</main>
+</body>
+</html>
