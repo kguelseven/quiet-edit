@@ -47,6 +47,10 @@ quietedit:
       max-window-factor: 4
       # The only setting that can refuse work the curve generates.
       max-requests-per-host-per-hour: ${QUIETEDIT_MAX_HOST_REQUESTS_PER_HOUR:120}
+      # How many of a feed's 'updated' claims may lead to no revision in a row
+      # before the feed stops being believed and its entries go back on the curve.
+      # One confirmed claim clears the count.
+      max-unconfirmed-updated-claims: 20
       # Not a policy number: how many stored documents one run reads back to ask
       # the policy about, most overdue first.
       max-candidates-per-run: 500

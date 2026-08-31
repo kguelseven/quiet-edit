@@ -1,0 +1,23 @@
+-- Remembers how much a feed's own 'updated' dates are worth. Additive: one new
+-- column on feed, nothing from V1..V5 renamed or removed.
+--
+-- The re-check policy treats an entry whose feed claims an edit since the last look
+-- as due at once, interval and observation window both overridden. A CMS that writes
+-- the render time into that field therefore makes every one of its entries
+-- permanently due, and until now only the per-host hourly ceiling bounded the cost --
+-- which it did by starving that host's real re-checks.
+--
+-- A strike count, not a lifetime total, and deliberately shaped like
+-- article_attempt.failure_count: it counts fetches made while the feed's claim stood
+-- that found the text exactly where it was, and any fetch made on a standing claim
+-- that does yield a revision resets it to zero. Per feed rather than per document,
+-- because a templated 'updated' field is a property of the publisher's CMS and shows
+-- itself across the whole feed at once; one document could never carry enough
+-- evidence to tell a template apart from an article that really is being worked on.
+--
+-- Not null with a zero default: a feed with no record yet is trusted, which is the
+-- behaviour every feed had before this column existed.
+--
+-- The ticket (quietedit-cca.7) names no Flyway version. V6 is the next free number.
+alter table feed
+    add column unconfirmed_updated_claims int not null default 0;
