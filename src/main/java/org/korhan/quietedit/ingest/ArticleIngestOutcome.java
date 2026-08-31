@@ -54,5 +54,18 @@ public enum ArticleIngestOutcome {
      * many runs in a row. Reported rather than dropped silently, because a feed that
      * starts abandoning links is a fact about the publisher an operator wants to see.
      */
-    ABANDONED
+    ABANDONED,
+
+    /**
+     * Never fetched, because it was not time: {@link RecheckPolicy} says the document
+     * was looked at too recently, has been stable for long enough to be retired, or
+     * that its host has had its hour's worth of requests. Which of the three is in the
+     * result's reason.
+     *
+     * <p>By far the most common outcome once a catalogue is warm, and the reason the
+     * others stay affordable: a feed re-advertises the same thirty links every poll,
+     * and fetching all of them every time is how a re-check budget gets spent on
+     * articles nobody is editing.
+     */
+    NOT_DUE
 }

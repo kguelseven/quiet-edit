@@ -3,6 +3,7 @@ package org.korhan.quietedit.ingest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * The result of one {@code runOnce()}: what the catalogue said, how every feed
@@ -10,15 +11,23 @@ import java.util.List;
  *
  * <p>Counts are derived rather than stored so that they cannot drift from the
  * per-feed detail they summarise.
+ *
+ * <p>{@code rechecks} is the run's second source of articles: documents the re-check
+ * policy offered that no feed advertised any more. They are kept apart from
+ * {@code feeds} because they belong to no feed's answer -- a feed's entry count and
+ * its article list have to keep adding up -- but they are articles of the same run,
+ * so {@link #articles()} and every count over it include them.
  */
 public record IngestRun(
         Instant startedAt,
         Instant finishedAt,
         FeedCatalogService.CatalogSync catalog,
-        List<FeedIngestResult> feeds) {
+        List<FeedIngestResult> feeds,
+        List<ArticleIngestResult> rechecks) {
 
     public IngestRun {
         feeds = List.copyOf(feeds);
+        rechecks = List.copyOf(rechecks);
     }
 
     public Duration duration() {
@@ -30,7 +39,8 @@ public record IngestRun(
     }
 
     public List<ArticleIngestResult> articles() {
-        return feeds.stream().flatMap(feed -> feed.articles().stream()).toList();
+        return Stream.concat(feeds.stream().flatMap(feed -> feed.articles().stream()), rechecks.stream())
+                .toList();
     }
 
     /**

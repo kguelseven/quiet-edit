@@ -33,9 +33,12 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * The whole path from outside to inside, against a real database and a real HTTP
@@ -94,6 +97,12 @@ class IngestRunTest {
         // still be in force in the next one.
         registry.add("quietedit.ingest.article.robots-cache-ttl", () -> "0ms");
         registry.add("quietedit.ingest.article.robots-failure-cache-ttl", () -> "0ms");
+        // The curve's floor, effectively removed: these tests poll the same article
+        // several times a second, and every one of those looks has to happen. What the
+        // curve actually decides is asserted in RecheckPolicyTest, over days rather
+        // than milliseconds; what the tests below assert is that the run asks it at
+        // all -- which the observation window, left at its default, is enough for.
+        registry.add("quietedit.ingest.recheck.min-interval", () -> "1ms");
     }
 
     @AfterAll
@@ -446,6 +455,97 @@ class IngestRunTest {
         assertThat(versions.count()).isEqualTo(3);
     }
 
+    /**
+     * The re-check policy, reached through a run: an article nothing has been observed
+     * to do for a month is not fetched again, and the run says why rather than staying
+     * silent about a link it declined.
+     *
+     * <p>The document is back-dated rather than the clock advanced, which is the same
+     * state from the policy's point of view and needs no clock of its own. Driving this
+     * test from a fixed clock is tracked separately.
+     */
+    @Test
+    void aFeedLinkWhoseArticleHasBeenStableForAMonthIsNotFetchedAgain() {
+        server.stubFor(get("/broken.xml").willReturn(aResponse().withStatus(500)));
+        server.stubFor(get("/press.xml").willReturn(ok(feedBody("Press", "/steuerreform"))));
+        server.stubFor(get("/wire.xml").willReturn(ok(feedBody("Wire"))));
+        server.stubFor(get("/steuerreform").willReturn(articlePage("Steuerreform beschlossen")));
+
+        assertThat(ingestService.runOnce().count(ArticleIngestOutcome.NEW)).isEqualTo(1);
+        server.verify(1, getRequestedFor(urlEqualTo("/steuerreform")));
+        retireDocument(canonical("/steuerreform"));
+
+        IngestRun second = ingestService.runOnce();
+
+        ArticleIngestResult declined = article(second, "/steuerreform");
+        assertThat(declined.outcome()).isEqualTo(ArticleIngestOutcome.NOT_DUE);
+        assertThat(declined.reason()).contains("retired");
+        assertThat(second.count(ArticleIngestOutcome.NOT_DUE)).isEqualTo(1);
+        // The feed advertised it and the run still spent nothing on it.
+        server.verify(1, getRequestedFor(urlEqualTo("/steuerreform")));
+        assertThat(versions.count()).isEqualTo(1);
+    }
+
+    /**
+     * The one claim a publisher makes that this system acts on: a feed saying the entry
+     * was updated after the last look brings even a retired article back for one fetch.
+     * What changed is still decided by comparing the text -- here nothing did, so the
+     * look costs a request and adds no revision.
+     */
+    @Test
+    void anUpdatedDateInTheFeedBringsARetiredArticleBackForOneLook() {
+        server.stubFor(get("/broken.xml").willReturn(aResponse().withStatus(500)));
+        server.stubFor(get("/press.xml").willReturn(ok(feedBody("Press", "/steuerreform"))));
+        server.stubFor(get("/wire.xml").willReturn(ok(feedBody("Wire"))));
+        server.stubFor(get("/steuerreform").willReturn(articlePage("Steuerreform beschlossen")));
+
+        ingestService.runOnce();
+        retireDocument(canonical("/steuerreform"));
+
+        server.stubFor(get("/press.xml").willReturn(ok(feedBodyClaimingAnUpdate(
+                "Press", "/steuerreform", Instant.now().minus(Duration.ofDays(1))))));
+        IngestRun second = ingestService.runOnce();
+
+        assertThat(article(second, "/steuerreform").outcome()).isEqualTo(ArticleIngestOutcome.UNCHANGED);
+        server.verify(2, getRequestedFor(urlEqualTo("/steuerreform")));
+        assertThat(versions.count()).isEqualTo(1);
+    }
+
+    /**
+     * The half of the policy a feed cannot supply. A publisher's feed carries about a
+     * day of articles, so without offering the store's own documents the curve would
+     * stop being applied exactly where a feed drops an entry -- days before this system
+     * stops caring. Two documents no feed mentions: one three days old, one a month
+     * old. Only the first is still worth a request.
+     *
+     * <p>The three-day-old candidate is asserted as a candidate rather than as a
+     * fetched article: a re-check requests the document's <em>canonical</em> URL, which
+     * {@code UrlCanonicalizer} has upgraded to https, and WireMock here serves plain
+     * http. What the test is for is which documents the run offers the policy, and that
+     * is decided before anything is fetched.
+     */
+    @Test
+    void documentsNoFeedAdvertisesAnyMoreAreOfferedUntilTheirWindowCloses() {
+        server.stubFor(get("/broken.xml").willReturn(aResponse().withStatus(500)));
+        server.stubFor(get("/press.xml").willReturn(ok(feedBody("Press"))));
+        server.stubFor(get("/wire.xml").willReturn(ok(feedBody("Wire"))));
+
+        // One run to seed the catalogue, so the seeded documents have a feed to belong to.
+        ingestService.runOnce();
+        UUID feedId = feeds.findByUrl(url("/press.xml")).orElseThrow().getId();
+        Instant now = Instant.now();
+        seedDocument(canonical("/vorwoche"), feedId, now.minus(Duration.ofDays(3)));
+        seedDocument(canonical("/archiv"), feedId, now.minus(Duration.ofDays(30)));
+
+        IngestRun run = ingestService.runOnce();
+
+        assertThat(run.rechecks()).extracting(ArticleIngestResult::link)
+                .containsExactly(canonical("/vorwoche"));
+        // No feed carried either link, so neither shows up in a feed's answer.
+        assertThat(run.feeds()).allSatisfy(feed -> assertThat(feed.articles()).isEmpty());
+        server.verify(0, getRequestedFor(urlEqualTo("/archiv")));
+    }
+
     /** The endpoint is the same run, so it only has to agree with it. */
     @Test
     void theEndpointReportsTheSameRun() {
@@ -464,6 +564,23 @@ class IngestRunTest {
         assertThat(response.articleSummary().changed()).isZero();
         assertThat(response.feeds()).hasSize(3);
         assertThat(documents.count()).isEqualTo(1);
+    }
+
+    /**
+     * Back-dates a document past its observation window. The same state the policy
+     * would see after a month of quiet, without a month of waiting.
+     */
+    private void retireDocument(String canonicalUrl) {
+        Document document = documents.findByCanonicalUrl(canonicalUrl).orElseThrow();
+        Instant longAgo = document.getFirstSeenAt().minus(Duration.ofDays(30));
+        document.setFirstSeenAt(longAgo);
+        document.setLastCheckedAt(longAgo);
+        documents.save(document);
+    }
+
+    /** A document this system knows and no feed mentions, discovered and last looked at then. */
+    private void seedDocument(String canonicalUrl, UUID feedId, Instant discoveredAt) {
+        documents.save(new Document(canonicalUrl, feedId, discoveredAt, discoveredAt));
     }
 
     private static ArticleIngestResult article(IngestRun run, String path) {
@@ -509,6 +626,22 @@ class IngestRunTest {
                   <item><title>Ohne Link</title></item>
                 </channel></rss>
                 """.formatted(title, items);
+    }
+
+    /** One entry, with the {@code updated} field the re-check policy reads. */
+    private static String feedBodyClaimingAnUpdate(String title, String path, Instant updatedAt) {
+        return """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <rss version="2.0"><channel>
+                  <title>%s</title>
+                  <item>
+                    <title>%s</title>
+                    <link>%s</link>
+                    <pubDate>Mon, 24 Aug 2026 07:14:00 +0200</pubDate>
+                    <updated>%s</updated>
+                  </item>
+                </channel></rss>
+                """.formatted(title, path, url(path), DateTimeFormatter.ISO_INSTANT.format(updatedAt));
     }
 
     private static ResponseDefinitionBuilder articlePage(String headline) {

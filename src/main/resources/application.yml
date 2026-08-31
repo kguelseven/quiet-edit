@@ -34,6 +34,22 @@ quietedit:
       # Ceiling on the articles one run may fetch. Nothing above it is lost: the
       # next run takes the least recently fetched candidates first.
       max-articles: ${QUIETEDIT_MAX_ARTICLES_PER_RUN:100}
+    recheck:
+      # When a known article is fetched again. The curve is one number: re-check
+      # after this fraction of the article's age, so attention decays the way a
+      # newsroom's does. The reasoning is in RecheckPolicy.
+      age-factor: 0.25
+      min-interval: 10m
+      max-interval: 12h
+      # A stable article is watched this long after the last thing that happened
+      # to it; every observed edit buys another window, up to max-window-factor.
+      observation-window: 7d
+      max-window-factor: 4
+      # The only setting that can refuse work the curve generates.
+      max-requests-per-host-per-hour: ${QUIETEDIT_MAX_HOST_REQUESTS_PER_HOUR:120}
+      # Not a policy number: how many stored documents one run reads back to ask
+      # the policy about, most overdue first.
+      max-candidates-per-run: 500
     catalog:
       location: ${QUIETEDIT_FEEDS_FILE:file:./feeds.yaml}
     fetch:
