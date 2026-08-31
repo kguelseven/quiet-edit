@@ -29,18 +29,18 @@ quietedit:
       # The timer only calls runOnce(); the same run is reachable via POST /api/ingest/run.
       enabled: ${QUIETEDIT_SCHEDULE_ENABLED:true}
       # Fixed delay, measured from the end of the previous run.
-      interval: ${QUIETEDIT_SCHEDULE_INTERVAL:15m}
+      interval: ${QUIETEDIT_SCHEDULE_INTERVAL:5m}
     run:
       # Ceiling on the articles one run may fetch. Nothing above it is lost: the
       # next run takes the least recently fetched candidates first.
-      max-articles: ${QUIETEDIT_MAX_ARTICLES_PER_RUN:50}
+      max-articles: ${QUIETEDIT_MAX_ARTICLES_PER_RUN:100}
     catalog:
       location: ${QUIETEDIT_FEEDS_FILE:file:./feeds.yaml}
     fetch:
       connect-timeout: 5s
       request-timeout: 15s
       # Per host, not per feed: several feeds can share one origin.
-      min-host-interval: 2s
+      min-host-interval: 1s
       # Counts the first try, so this is one try plus two retries.
       max-attempts: 3
       initial-backoff: 500ms
@@ -63,4 +63,5 @@ server:
 
 logging:
   level:
-    org.korhan.quietedit: INFO
+    org.korhan.quietedit: DEBUG
+    org.korhan.quietedit.ingest.FeedFetchService: DEBUG

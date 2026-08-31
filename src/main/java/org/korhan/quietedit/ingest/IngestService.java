@@ -397,6 +397,9 @@ public class IngestService {
             return ArticleIngestResult.failed(candidate.link(), fetch.finalUrl(),
                     "not versioned: " + e.getClass().getSimpleName());
         }
+        log.debug("{} {} {} -> v{}", stored.outcome(),
+                registration.created() ? "new" : "seen",
+                attempt.canonicalUrl(), stored.versionNumber());
         if (stored.outcome() == VersionOutcome.APPENDED && !registration.created()) {
             log.info("{} changed: version {} appended", attempt.canonicalUrl(), stored.versionNumber());
         }
