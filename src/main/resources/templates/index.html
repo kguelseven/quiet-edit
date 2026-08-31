@@ -42,8 +42,8 @@
 
         <!-- Outside the form on purpose: these are totals for the whole feed, not part of
              the filtered result, and they stay put when a filter is applied.
-             Fetch times are rendered in the server's zone, which is where the person
-             reading this page and the scheduler that produced the stamp both are. -->
+             Fetch times go through the same renderer as every other timestamp here;
+             the zone it uses is named in the masthead. -->
         <aside class="coverage">
             <h2>Feeds</h2>
             <ul>
@@ -51,7 +51,7 @@
                     <span class="name" th:text="${feed.name}">feed</span>:
                     <span th:text="${feed.documents}">0</span> articles
                     <span class="muted" th:if="${feed.lastFetchedAt != null}">
-                        (last fetched <span th:text="${#temporals.format(feed.lastFetchedAt, 'dd.MM.yyyy HH:mm')}">never</span>)
+                        (last fetched <span th:text="${@timestamps.format(feed.lastFetchedAt)}">never</span>)
                     </span>
                     <span class="muted" th:if="${feed.lastFetchedAt == null}">(never fetched)</span>
                 </li>
@@ -95,7 +95,7 @@
             </td>
             <td th:text="${row.host}">host</td>
             <td class="num" th:text="${row.revisions}">0</td>
-            <td th:text="${row.lastChangedAt}">never</td>
+            <td th:text="${@timestamps.format(row.lastChangedAt)}">never</td>
             <!-- Paragraph count of the newest revision: a low one is what a paywalled
                  excerpt or a ticker without entry bodies looks like. -->
             <td class="num" th:text="${row.paragraphs}">0</td>

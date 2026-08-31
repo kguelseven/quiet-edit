@@ -14,12 +14,18 @@
         <span class="muted" th:text="${view.host}">host</span>
     </p>
 
+    <!-- The panels show the minute; the seconds sit in a title attribute, because two
+         revisions of one article can be seconds apart and the display would hide it. -->
     <section class="revisions">
         <div class="side">
             <h2>Revision <span th:text="${view.from.number}">1</span></h2>
             <dl>
-                <dt>fetched</dt><dd th:text="${view.from.fetchedAt}"></dd>
-                <dt>published</dt><dd th:text="${view.from.publishedAt} ?: '-'"></dd>
+                <dt>fetched</dt>
+                <dd th:text="${@timestamps.format(view.from.fetchedAt)}"
+                    th:title="${@timestamps.exact(view.from.fetchedAt)}"></dd>
+                <dt>published</dt>
+                <dd th:text="${@timestamps.format(view.from.publishedAt)} ?: '-'"
+                    th:title="${@timestamps.exact(view.from.publishedAt)}"></dd>
                 <dt>paragraphs</dt><dd th:text="${view.from.paragraphs}"></dd>
                 <dt>encoding</dt><dd th:text="${view.from.encoding} ?: 'not recorded'"></dd>
                 <dt>hash</dt><dd class="hash" th:text="${view.from.contentHash}"></dd>
@@ -28,8 +34,12 @@
         <div class="side">
             <h2>Revision <span th:text="${view.to.number}">2</span></h2>
             <dl>
-                <dt>fetched</dt><dd th:text="${view.to.fetchedAt}"></dd>
-                <dt>published</dt><dd th:text="${view.to.publishedAt} ?: '-'"></dd>
+                <dt>fetched</dt>
+                <dd th:text="${@timestamps.format(view.to.fetchedAt)}"
+                    th:title="${@timestamps.exact(view.to.fetchedAt)}"></dd>
+                <dt>published</dt>
+                <dd th:text="${@timestamps.format(view.to.publishedAt)} ?: '-'"
+                    th:title="${@timestamps.exact(view.to.publishedAt)}"></dd>
                 <dt>paragraphs</dt><dd th:text="${view.to.paragraphs}"></dd>
                 <dt>encoding</dt><dd th:text="${view.to.encoding} ?: 'not recorded'"></dd>
                 <dt>hash</dt><dd class="hash" th:text="${view.to.contentHash}"></dd>
