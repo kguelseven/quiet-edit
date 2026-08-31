@@ -1,0 +1,9 @@
+# The same ticker one re-check later. The index line dropped its first entry -- the
+# false positive this rule exists for -- and the body of the last entry was genuinely
+# corrected from 1300 to 1400.
+Liveticker zur Sturzflut in Nepal
+Keine Informationen zu Schweizer Opfern
+Keine Informationen zu Schweizer Opfern
+Das EDA hat bislang keine Kenntnis von betroffenen Schweizer Staatsangehörigen.
+Nepal: Zahl der Vermissten steigt auf über 1300
+Die Behörden in Kathmandu melden über 1400 Vermisste.
