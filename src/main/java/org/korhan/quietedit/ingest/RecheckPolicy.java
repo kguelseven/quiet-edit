@@ -82,10 +82,49 @@ import java.util.SequencedSet;
  * retrieval time would answer "yes" forever. Those all fall back to the curve, which
  * needed no claim in the first place.
  *
- * <p>Known weakness: a CMS that stamps {@code updated} with the render time makes
- * every one of its entries permanently due. The per-host ceiling below is what bounds
- * the cost, and it bounds it per host, which is exactly the granularity such a CMS
- * misbehaves at.
+ * <h2>A feed whose claims never come true stops being believed</h2>
+ * A CMS that stamps {@code updated} with the render time would otherwise make every
+ * one of its entries permanently due, and the per-host ceiling is a poor answer to
+ * that: it bounds the cost by starving the same host's real re-checks, so the
+ * publisher whose dates are noise takes the requests away from the articles that
+ * actually need watching.
+ *
+ * <p>So the claim has to earn its override. A feed carries a strike count -- fetches
+ * made while one of its claims stood that found the text exactly where it was,
+ * cleared by the first such fetch that appends a revision (see
+ * {@link UpdatedClaimTally}). Once that count reaches
+ * {@code maxUnconfirmedUpdatedClaims}, the feed's {@code updated} dates stop
+ * overriding anything and its articles are re-checked on the curve like everything
+ * else. Nothing else about them changes: they are still fetched, still versioned,
+ * still watched for their whole observation window. What is withdrawn is only the
+ * publisher's power to say "now".
+ *
+ * <p>Per feed, not per document, because a templated {@code updated} field is a
+ * property of the CMS and shows itself across the whole feed at once. One document
+ * could never carry enough evidence to tell a template apart from an article that
+ * genuinely is being worked on, and waiting for per-document evidence would mean
+ * paying the full cost on every entry before recognising any of them.
+ *
+ * <p>Twenty is the default, and the number that matters about it is how fast a
+ * misbehaving feed is caught. A feed carries a day or so of entries -- a few dozen --
+ * and the run after the one that discovered them is the first where every entry has
+ * a claim standing over a previous check. That run spends its requests, finds nothing
+ * moved, and puts the feed well past twenty; from the next run on, the CMS costs
+ * nothing beyond the curve. Twenty is also comfortably more than one busy article can
+ * produce on its own, and the whole count is wiped by a single confirmed claim, so a
+ * publisher who really does edit is never near it.
+ *
+ * <p>Recovering is possible on purpose, and it is why the strike count is fed by
+ * <em>every</em> fetch under a standing claim rather than only by the ones the claim
+ * caused. A distrusted feed's articles keep being fetched on the curve; each of those
+ * fetches still tests the claim standing over it, and the first one that finds a real
+ * edit clears the record and hands the publisher its override back.
+ *
+ * <p>Known weakness: the evidence is only ever collected from articles still under
+ * observation. A feed that is distrusted and then reforms is believed again as soon
+ * as one of its live articles is really edited, but a claim about an article this
+ * system has already retired cannot bring that article back any more, and so cannot
+ * be the thing that rehabilitates the feed.
  *
  * <h2>An article that keeps changing stays under observation longer</h2>
  * A candidate is retired -- never re-checked again -- once nothing has happened to it
@@ -151,6 +190,9 @@ import java.util.SequencedSet;
  * @param maxWindowFactor            how many windows an article's observed edits can
  *                                   earn it
  * @param maxRequestsPerHostPerHour  the trailing-hour ceiling per host
+ * @param maxUnconfirmedUpdatedClaims  how many of a feed's {@code updated} claims may
+ *                                   lead to nothing in a row before the feed's claims
+ *                                   stop overriding the curve
  */
 public record RecheckPolicy(
         Duration minInterval,
@@ -158,7 +200,8 @@ public record RecheckPolicy(
         double ageFactor,
         Duration observationWindow,
         int maxWindowFactor,
-        int maxRequestsPerHostPerHour) {
+        int maxRequestsPerHostPerHour,
+        int maxUnconfirmedUpdatedClaims) {
 
     /** The ceiling's window. Fixed at an hour because the criterion it serves is hourly. */
     private static final Duration CEILING_WINDOW = Duration.ofHours(1);
@@ -178,6 +221,9 @@ public record RecheckPolicy(
         }
         if (maxRequestsPerHostPerHour < 1) {
             throw new IllegalArgumentException("maxRequestsPerHostPerHour must be >= 1");
+        }
+        if (maxUnconfirmedUpdatedClaims < 1) {
+            throw new IllegalArgumentException("maxUnconfirmedUpdatedClaims must be >= 1");
         }
     }
 
@@ -236,10 +282,28 @@ public record RecheckPolicy(
      * Whether the feed's own {@code updated} field says something happened after this
      * system last looked. Only an exactly normalised date counts, for the reason given
      * in the class comment: an inexact one cannot answer a question asked in minutes.
+     *
+     * <p>Public because it is also the rule for what counts as evidence about a feed:
+     * a fetch tests a claim exactly when a claim was standing over it, and the run
+     * that collects that evidence must ask the same question this class answers rather
+     * than a lookalike of its own.
+     *
+     * @throws NullPointerException if the candidate has never been checked -- an
+     *                              unseen candidate has no last look for a claim to be
+     *                              newer than, and is fetched regardless
      */
-    private static boolean claimsAnEditSinceTheLastCheck(RecheckState state) {
+    public static boolean claimsAnEditSinceTheLastCheck(RecheckState state) {
         NormalisedDate updated = state.feedUpdated();
         return updated.exact() && updated.instant().isAfter(state.lastCheckedAt());
+    }
+
+    /**
+     * Whether this candidate's feed has any credit left for its {@code updated} dates.
+     * False means the claims are still read and still counted -- they are simply no
+     * longer a reason to fetch at once. The justification is in the class comment.
+     */
+    public boolean believesUpdatedClaims(RecheckState state) {
+        return state.unconfirmedUpdatedClaims() < maxUnconfirmedUpdatedClaims;
     }
 
     /** The decision for one candidate on its own, before the host ceiling is applied. */
@@ -247,7 +311,7 @@ public record RecheckPolicy(
         if (!state.seen()) {
             return RecheckDecision.DUE;
         }
-        if (claimsAnEditSinceTheLastCheck(state)) {
+        if (claimsAnEditSinceTheLastCheck(state) && believesUpdatedClaims(state)) {
             return RecheckDecision.DUE;
         }
         Duration sinceEvent = age(now, state);

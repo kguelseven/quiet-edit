@@ -11,10 +11,12 @@ import java.time.Duration;
  * while these say which candidates are worth offering it in the first place.
  *
  * <p>Every number's justification is in {@link RecheckPolicy}, next to the code that
- * acts on it. Two of them are worth repeating here because they are the ones an
+ * acts on it. Three of them are worth repeating here because they are the ones an
  * operator would reach for: {@code ageFactor} is the whole curve -- a candidate is
- * re-checked after that fraction of its age -- and {@code maxRequestsPerHostPerHour}
- * is the only setting that can refuse work the curve generates.
+ * re-checked after that fraction of its age -- {@code maxRequestsPerHostPerHour} is
+ * the only setting that can refuse work the curve generates, and
+ * {@code maxUnconfirmedUpdatedClaims} is how patient this system is with a publisher
+ * whose {@code updated} dates never turn out to mean anything.
  *
  * <p>{@code maxCandidatesPerRun} is not a policy number: it is the ceiling on how
  * many stored documents a run reads back to ask the policy about. It exists so that a
@@ -31,6 +33,7 @@ public record RecheckProperties(
         @DefaultValue("7d") Duration observationWindow,
         @DefaultValue("4") int maxWindowFactor,
         @DefaultValue("120") int maxRequestsPerHostPerHour,
+        @DefaultValue("20") int maxUnconfirmedUpdatedClaims,
         @DefaultValue("500") int maxCandidatesPerRun) {
 
     public RecheckProperties {
@@ -46,6 +49,6 @@ public record RecheckProperties(
      */
     public RecheckPolicy toPolicy() {
         return new RecheckPolicy(minInterval, maxInterval, ageFactor, observationWindow,
-                maxWindowFactor, maxRequestsPerHostPerHour);
+                maxWindowFactor, maxRequestsPerHostPerHour, maxUnconfirmedUpdatedClaims);
     }
 }

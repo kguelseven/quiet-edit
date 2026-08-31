@@ -36,6 +36,15 @@ import java.time.Instant;
  *                       can see whether the publisher's date was exact -- deciding
  *                       what an inexact claim is worth is the policy's call, not the
  *                       caller's.
+ * @param unconfirmedUpdatedClaims  how many fetches this candidate's <em>feed</em>
+ *                       has run up under a standing {@code updated} claim without a
+ *                       revision coming of it, cleared by the first one that does.
+ *                       A property of the publisher rather than of this candidate,
+ *                       and it is here for the same reason {@code feedUpdated} is:
+ *                       what a claim is worth is the policy's call, and it cannot
+ *                       make that call without knowing what the last few thousand
+ *                       claims from the same source were worth. Maintained by
+ *                       {@link UpdatedClaimLog}.
  */
 public record RecheckState(
         String host,
@@ -43,7 +52,8 @@ public record RecheckState(
         Instant lastCheckedAt,
         Instant lastChangedAt,
         int versionCount,
-        NormalisedDate feedUpdated) {
+        NormalisedDate feedUpdated,
+        int unconfirmedUpdatedClaims) {
 
     public RecheckState {
         feedUpdated = feedUpdated == null ? NormalisedDate.ABSENT : feedUpdated;
@@ -52,6 +62,9 @@ public record RecheckState(
         }
         if (versionCount < 0) {
             throw new IllegalArgumentException("versionCount must be >= 0");
+        }
+        if (unconfirmedUpdatedClaims < 0) {
+            throw new IllegalArgumentException("unconfirmedUpdatedClaims must be >= 0");
         }
         if (firstSeenAt == null && (lastCheckedAt != null || lastChangedAt != null || versionCount != 0)) {
             throw new IllegalArgumentException("an unseen candidate cannot have a history");
@@ -67,7 +80,7 @@ public record RecheckState(
      * to a host, so it takes part in the ceiling.
      */
     public static RecheckState unseen(String host) {
-        return new RecheckState(host, null, null, null, 0, NormalisedDate.ABSENT);
+        return new RecheckState(host, null, null, null, 0, NormalisedDate.ABSENT, 0);
     }
 
     public boolean seen() {

@@ -17,6 +17,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -60,6 +62,14 @@ import java.util.stream.Stream;
  * dates are therefore normalised at different moments against different reference
  * times, which is correct: one is evidence about an article, the other is a hint
  * about when to fetch it.
+ *
+ * <p>A run is also where those hints are scored. Whenever a claim was standing over
+ * an article at planning time, whatever the article was fetched <em>for</em>, the
+ * verdict the version store reaches about its text is evidence about the feed that
+ * made the claim, and it is handed to {@link UpdatedClaimLog}. That is the only place
+ * the two halves meet -- the claim is known before the fetch, the verdict only after
+ * it -- so it has to happen here rather than in the policy, which may not remember
+ * anything.
  *
  * <p>A run has two sources of candidates. Every feed's links are one; the documents
  * {@link RecheckPolicy} still wants to watch are the other, and they are needed
@@ -124,6 +134,7 @@ public class IngestService {
     private final DocumentRegistry documents;
     private final VersionStore versions;
     private final ArticleAttemptLog attemptLog;
+    private final UpdatedClaimLog updatedClaims;
     private final Clock clock;
     private final ArticleBudget budget;
     private final RecheckPolicy recheck;
@@ -136,7 +147,7 @@ public class IngestService {
                          ArticleFetcher articleFetcher, ArticleExtractor articleExtractor,
                          RawHtmlStore rawHtml, UrlCanonicalizer canonicalizer,
                          DocumentRegistry documents, VersionStore versions,
-                         ArticleAttemptLog attemptLog, Clock clock,
+                         ArticleAttemptLog attemptLog, UpdatedClaimLog updatedClaims, Clock clock,
                          IngestRunProperties properties, RecheckProperties recheckProperties) {
         this.feedFetchService = feedFetchService;
         this.feedParser = feedParser;
@@ -147,6 +158,7 @@ public class IngestService {
         this.documents = documents;
         this.versions = versions;
         this.attemptLog = attemptLog;
+        this.updatedClaims = updatedClaims;
         this.clock = clock;
         this.budget = new ArticleBudget(properties.maxArticles(), properties.maxArticleFailures());
         this.recheck = recheckProperties.toPolicy();
@@ -180,12 +192,19 @@ public class IngestService {
         RecheckWork rechecks = offerStoredDocuments(startedAt, known);
 
         List<Candidate> candidates = Stream.concat(feedCandidates.stream(), rechecks.candidates.stream()).toList();
-        for (Attempt attempt : fetchAll(admit(due(startedAt, candidates, known)))) {
+        Planned planned = due(startedAt, candidates, known);
+
+        Map<UUID, UpdatedClaimTally> evidence = new LinkedHashMap<>();
+        for (Attempt attempt : fetchAll(admit(planned.candidates()))) {
             Candidate candidate = attempt.candidate();
             ArticleIngestResult result = resolve(attempt);
             candidate.sink().accept(candidate.slot(), result);
             recordAttempt(candidate, result);
+            if (planned.underAStandingClaim().contains(candidate.identity())) {
+                score(evidence, candidate, result);
+            }
         }
+        recordUpdatedClaims(evidence);
 
         IngestRun run = new IngestRun(startedAt, clock.instant(), feedRun.catalog(),
                 work.stream().map(FeedWork::toResult).toList(), rechecks.results());
@@ -255,17 +274,30 @@ public class IngestService {
      * due, and would report them as deferred -- which claims the next run will reach
      * them, when what is true is that nothing needs to.
      */
-    private List<Candidate> due(Instant now, List<Candidate> candidates,
-                                Map<String, DocumentObservation> known) {
+    private Planned due(Instant now, List<Candidate> candidates,
+                        Map<String, DocumentObservation> known) {
         if (candidates.isEmpty()) {
-            return candidates;
+            return new Planned(candidates, Set.of());
         }
-        RecheckPolicy.Plan plan = recheck.plan(now,
-                candidates.stream().map(candidate -> stateOf(now, candidate, known)).toList());
+        Map<UUID, Integer> claims = updatedClaims.unconfirmedClaimsOf(
+                candidates.stream().map(Candidate::feedId).collect(Collectors.toSet()));
+        List<RecheckState> states = candidates.stream()
+                .map(candidate -> stateOf(now, candidate, known, claims))
+                .toList();
+        RecheckPolicy.Plan plan = recheck.plan(now, states);
 
         List<Candidate> due = new ArrayList<>(plan.due().size());
+        Set<String> underAStandingClaim = new HashSet<>();
+        int ignoredClaims = 0;
         for (int position = 0; position < candidates.size(); position++) {
             Candidate candidate = candidates.get(position);
+            RecheckState state = states.get(position);
+            if (state.seen() && RecheckPolicy.claimsAnEditSinceTheLastCheck(state)) {
+                underAStandingClaim.add(candidate.identity());
+                if (!recheck.believesUpdatedClaims(state)) {
+                    ignoredClaims++;
+                }
+            }
             RecheckDecision decision = plan.at(position);
             if (decision == RecheckDecision.DUE) {
                 due.add(candidate);
@@ -278,10 +310,51 @@ public class IngestService {
             log.warn("{} candidates were held back by the per-host ceiling of {} requests an hour",
                     plan.count(RecheckDecision.THROTTLED), recheck.maxRequestsPerHostPerHour());
         }
+        if (ignoredClaims > 0) {
+            log.info("{} feed 'updated' claims were read but not acted on: their feeds have run up "
+                            + "{} unconfirmed claims and are back on the re-check curve",
+                    ignoredClaims, recheck.maxUnconfirmedUpdatedClaims());
+        }
         log.debug("Re-check policy: {} of {} candidates due, {} waiting, {} retired, {} throttled",
                 due.size(), candidates.size(), plan.count(RecheckDecision.WAITING),
                 plan.count(RecheckDecision.RETIRED), plan.count(RecheckDecision.THROTTLED));
-        return due;
+        return new Planned(due, underAStandingClaim);
+    }
+
+    /**
+     * Adds what one fetch found to its feed's tally, but only for the outcomes that
+     * settle whether the text moved. A skipped, failed or newly registered article
+     * tests nothing about the claim that stood over it, and counting it either way
+     * would make a publisher's credibility depend on their paywall.
+     */
+    private static void score(Map<UUID, UpdatedClaimTally> evidence, Candidate candidate,
+                              ArticleIngestResult result) {
+        switch (result.outcome()) {
+            case CHANGED -> evidence.merge(candidate.feedId(),
+                    UpdatedClaimTally.NONE.plus(true), UpdatedClaimTally::plus);
+            case UNCHANGED -> evidence.merge(candidate.feedId(),
+                    UpdatedClaimTally.NONE.plus(false), UpdatedClaimTally::plus);
+            default -> { }
+        }
+    }
+
+    /**
+     * Writes back what this run learned about each feed's {@code updated} dates.
+     *
+     * <p>Contained per feed like every other write a run makes: a strike that cannot
+     * be recorded costs one run's worth of evidence about one publisher, and the rule
+     * is a running count precisely so that a lost increment is survivable.
+     */
+    private void recordUpdatedClaims(Map<UUID, UpdatedClaimTally> evidence) {
+        evidence.forEach((feedId, tally) -> {
+            try {
+                int unconfirmed = updatedClaims.record(feedId, tally);
+                log.debug("Feed {}: {} of {} standing 'updated' claims confirmed, {} unconfirmed in a row",
+                        feedId, tally.confirmed(), tally.fetches(), unconfirmed);
+            } catch (RuntimeException e) {
+                log.error("Could not record the 'updated' claim evidence for feed {}", feedId, e);
+            }
+        });
     }
 
     /**
@@ -293,7 +366,8 @@ public class IngestService {
      * start is this method's, because the question is asked before anything is fetched
      * and there is no later timestamp to measure against yet.
      */
-    private RecheckState stateOf(Instant now, Candidate candidate, Map<String, DocumentObservation> known) {
+    private RecheckState stateOf(Instant now, Candidate candidate,
+                                 Map<String, DocumentObservation> known, Map<UUID, Integer> claims) {
         String host = hostOf(candidate.identity());
         DocumentObservation observation = known.get(candidate.identity());
         if (observation == null) {
@@ -301,7 +375,8 @@ public class IngestService {
         }
         return new RecheckState(host, observation.firstSeenAt(), observation.lastCheckedAt(),
                 observation.lastChangedAt(), observation.versionCount(),
-                DateNormalizer.normalize(candidate.updatedRaw(), now));
+                DateNormalizer.normalize(candidate.updatedRaw(), now),
+                claims.getOrDefault(candidate.feedId(), 0));
     }
 
     /**
@@ -689,6 +764,20 @@ public class IngestService {
      */
     private record Candidate(ResultSink sink, int slot, UUID feedId, String link, String identity,
                              String feedTitle, String publishedRaw, String updatedRaw) {
+    }
+
+    /**
+     * What the re-check policy left for the run to do, plus the one thing about the
+     * planning step the fetch stage still needs afterwards.
+     *
+     * @param candidates          the candidates the policy said yes to, in their own order
+     * @param underAStandingClaim the identities whose feed claimed an edit since the
+     *                            last look, whether or not that claim is why they are
+     *                            in {@code candidates}. Kept because the claim is only
+     *                            knowable before the fetch and its verdict only after,
+     *                            and {@link UpdatedClaimTally} needs both
+     */
+    private record Planned(List<Candidate> candidates, Set<String> underAStandingClaim) {
     }
 
     /**

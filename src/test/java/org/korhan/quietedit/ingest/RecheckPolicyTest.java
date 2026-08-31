@@ -30,7 +30,7 @@ class RecheckPolicyTest {
 
     /** The shipped settings. Their justification is in {@link RecheckPolicy}. */
     private static final RecheckPolicy POLICY = new RecheckPolicy(
-            Duration.ofMinutes(10), Duration.ofHours(12), 0.25, Duration.ofDays(7), 4, 120);
+            Duration.ofMinutes(10), Duration.ofHours(12), 0.25, Duration.ofDays(7), 4, 120, 20);
 
     @Test
     void theIntervalIsAConstantFractionOfTheArticlesAge() {
@@ -165,6 +165,80 @@ class RecheckPolicyTest {
                 .isEqualTo(RecheckDecision.WAITING);
     }
 
+    /**
+     * The acceptance property. A publisher whose {@code updated} dates have been moving
+     * without the text ever moving loses the override; the curve, which needed no claim
+     * in the first place, answers instead.
+     */
+    @Test
+    void aFeedWhoseUpdateClaimsNeverComeTrueStopsOverridingTheCurve() {
+        RecheckState notYetDue = stable(NOW.minus(Duration.ofDays(3)), NOW.minus(Duration.ofMinutes(1)));
+        RecheckState claiming = claiming(notYetDue, exact(NOW.minus(Duration.ofSeconds(30))));
+
+        // Nineteen claims that led nowhere are not yet enough to stop believing the feed.
+        assertThat(decide(afterUnconfirmedClaims(claiming, 19))).isEqualTo(RecheckDecision.DUE);
+        assertThat(decide(afterUnconfirmedClaims(claiming, 20))).isEqualTo(RecheckDecision.WAITING);
+        assertThat(decide(afterUnconfirmedClaims(claiming, 5000))).isEqualTo(RecheckDecision.WAITING);
+    }
+
+    /**
+     * A distrusted feed loses only the override. Its articles are still fetched on the
+     * curve and still watched for their whole window -- which is also what keeps the
+     * evidence coming, so the feed can earn its claims back.
+     */
+    @Test
+    void aDistrustedFeedsArticlesAreStillReCheckedOnTheCurve() {
+        RecheckState due = claiming(stable(NOW.minus(Duration.ofDays(1)), NOW.minus(Duration.ofHours(7))),
+                exact(NOW.minus(Duration.ofSeconds(30))));
+
+        assertThat(decide(afterUnconfirmedClaims(due, 500))).isEqualTo(RecheckDecision.DUE);
+    }
+
+    /** Withdrawing the override also withdraws the one thing that outlived retirement. */
+    @Test
+    void aDistrustedFeedCannotBringBackARetiredCandidate() {
+        RecheckState retired = claiming(stable(NOW.minus(Duration.ofDays(40)), NOW.minus(Duration.ofDays(33))),
+                exact(NOW.minus(Duration.ofHours(1))));
+
+        assertThat(decide(retired)).isEqualTo(RecheckDecision.DUE);
+        assertThat(decide(afterUnconfirmedClaims(retired, 20))).isEqualTo(RecheckDecision.RETIRED);
+    }
+
+    /**
+     * The other half of the acceptance property, and the reason the count is
+     * consecutive rather than a lifetime ratio: one claim that produced a revision
+     * clears the whole record, so the very next claim is acted on again.
+     */
+    @Test
+    void oneConfirmedClaimHandsAFeedItsOverrideBack() {
+        RecheckState notYetDue = stable(NOW.minus(Duration.ofDays(3)), NOW.minus(Duration.ofMinutes(1)));
+        RecheckState claiming = claiming(notYetDue, exact(NOW.minus(Duration.ofSeconds(30))));
+
+        assertThat(decide(afterUnconfirmedClaims(claiming, 400))).isEqualTo(RecheckDecision.WAITING);
+
+        int cleared = new UpdatedClaimTally(9, 0).plus(true).appliedTo(400);
+        assertThat(cleared).isZero();
+        assertThat(decide(afterUnconfirmedClaims(claiming, cleared))).isEqualTo(RecheckDecision.DUE);
+    }
+
+    /**
+     * What a fetch has to be for its verdict to be evidence about a feed. The run
+     * asks this rather than a lookalike of its own, so it is asserted here.
+     */
+    @Test
+    void onlyAnExactClaimNewerThanTheLastLookIsAClaimAtAll() {
+        RecheckState checkedAMinuteAgo = stable(NOW.minus(Duration.ofDays(3)), NOW.minus(Duration.ofMinutes(1)));
+
+        assertThat(RecheckPolicy.claimsAnEditSinceTheLastCheck(
+                claiming(checkedAMinuteAgo, exact(NOW.minus(Duration.ofSeconds(30)))))).isTrue();
+        assertThat(RecheckPolicy.claimsAnEditSinceTheLastCheck(
+                claiming(checkedAMinuteAgo, exact(NOW.minus(Duration.ofHours(2)))))).isFalse();
+        assertThat(RecheckPolicy.claimsAnEditSinceTheLastCheck(
+                claiming(checkedAMinuteAgo, new NormalisedDate(NOW, false)))).isFalse();
+        assertThat(RecheckPolicy.claimsAnEditSinceTheLastCheck(
+                claiming(checkedAMinuteAgo, NormalisedDate.ABSENT))).isFalse();
+    }
+
     @Test
     void oneHostGetsNoMoreThanItsHoursWorthOfRequests() {
         RecheckPolicy policy = ceilingOf(2);
@@ -282,7 +356,7 @@ class RecheckPolicyTest {
         for (int minute = 1; minute <= Duration.ofDays(10).toMinutes(); minute++) {
             Instant now = discoveredAt.plus(Duration.ofMinutes(minute));
             RecheckState state = new RecheckState(HOST, discoveredAt, lastCheckedAt, null, 1,
-                    NormalisedDate.ABSENT);
+                    NormalisedDate.ABSENT, 0);
             if (POLICY.plan(now, List.of(state)).at(0) == RecheckDecision.DUE) {
                 checks.add(now);
                 lastCheckedAt = now;
@@ -310,7 +384,7 @@ class RecheckPolicyTest {
     @Test
     void aReferenceInstantInTheFutureCountsAsAgeZero() {
         RecheckState skewed = new RecheckState(HOST, NOW.plus(Duration.ofMinutes(5)),
-                NOW.minus(Duration.ofHours(1)), null, 1, NormalisedDate.ABSENT);
+                NOW.minus(Duration.ofHours(1)), null, 1, NormalisedDate.ABSENT, 0);
 
         assertThat(POLICY.intervalFor(NOW, skewed)).isEqualTo(Duration.ofMinutes(10));
         assertThat(decide(skewed)).isEqualTo(RecheckDecision.DUE);
@@ -319,24 +393,28 @@ class RecheckPolicyTest {
     @Test
     void settingsThatCannotDescribeACurveAreRejected() {
         assertThatThrownBy(() -> new RecheckPolicy(Duration.ZERO, Duration.ofHours(12), 0.25,
-                Duration.ofDays(7), 4, 120)).isInstanceOf(IllegalArgumentException.class);
+                Duration.ofDays(7), 4, 120, 20)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new RecheckPolicy(Duration.ofHours(2), Duration.ofHours(1), 0.25,
-                Duration.ofDays(7), 4, 120)).isInstanceOf(IllegalArgumentException.class);
+                Duration.ofDays(7), 4, 120, 20)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new RecheckPolicy(Duration.ofMinutes(10), Duration.ofHours(12), 0,
-                Duration.ofDays(7), 4, 120)).isInstanceOf(IllegalArgumentException.class);
+                Duration.ofDays(7), 4, 120, 20)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new RecheckPolicy(Duration.ofMinutes(10), Duration.ofHours(12), 0.25,
-                Duration.ofDays(7), 0, 120)).isInstanceOf(IllegalArgumentException.class);
+                Duration.ofDays(7), 0, 120, 20)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new RecheckPolicy(Duration.ofMinutes(10), Duration.ofHours(12), 0.25,
-                Duration.ofDays(7), 4, 0)).isInstanceOf(IllegalArgumentException.class);
+                Duration.ofDays(7), 4, 0, 20)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new RecheckPolicy(Duration.ofMinutes(10), Duration.ofHours(12), 0.25,
+                Duration.ofDays(7), 4, 120, 0)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void aStateThatClaimsAHistoryItCannotHaveIsRejected() {
-        assertThatThrownBy(() -> new RecheckState(HOST, null, NOW, null, 0, NormalisedDate.ABSENT))
+        assertThatThrownBy(() -> new RecheckState(HOST, null, NOW, null, 0, NormalisedDate.ABSENT, 0))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new RecheckState(HOST, NOW, null, null, 1, NormalisedDate.ABSENT))
+        assertThatThrownBy(() -> new RecheckState(HOST, NOW, null, null, 1, NormalisedDate.ABSENT, 0))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new RecheckState(" ", NOW, NOW, null, 1, NormalisedDate.ABSENT))
+        assertThatThrownBy(() -> new RecheckState(" ", NOW, NOW, null, 1, NormalisedDate.ABSENT, 0))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new RecheckState(HOST, NOW, NOW, null, 1, NormalisedDate.ABSENT, -1))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -350,23 +428,29 @@ class RecheckPolicyTest {
 
     private static RecheckPolicy ceilingOf(int requestsPerHostPerHour) {
         return new RecheckPolicy(Duration.ofMinutes(10), Duration.ofHours(12), 0.25,
-                Duration.ofDays(7), 4, requestsPerHostPerHour);
+                Duration.ofDays(7), 4, requestsPerHostPerHour, 20);
     }
 
     /** A document observed to say one thing only. */
     private static RecheckState stable(Instant firstSeenAt, Instant lastCheckedAt) {
-        return new RecheckState(HOST, firstSeenAt, lastCheckedAt, null, 1, NormalisedDate.ABSENT);
+        return new RecheckState(HOST, firstSeenAt, lastCheckedAt, null, 1, NormalisedDate.ABSENT, 0);
     }
 
     private static RecheckState edited(Instant firstSeenAt, Instant lastCheckedAt,
                                        Instant lastChangedAt, int versionCount) {
         return new RecheckState(HOST, firstSeenAt, lastCheckedAt, lastChangedAt, versionCount,
-                NormalisedDate.ABSENT);
+                NormalisedDate.ABSENT, 0);
     }
 
     private static RecheckState claiming(RecheckState state, NormalisedDate feedUpdated) {
         return new RecheckState(state.host(), state.firstSeenAt(), state.lastCheckedAt(),
-                state.lastChangedAt(), state.versionCount(), feedUpdated);
+                state.lastChangedAt(), state.versionCount(), feedUpdated, 0);
+    }
+
+    /** The same candidate, but its feed has run up this many claims that led nowhere. */
+    private static RecheckState afterUnconfirmedClaims(RecheckState state, int unconfirmed) {
+        return new RecheckState(state.host(), state.firstSeenAt(), state.lastCheckedAt(),
+                state.lastChangedAt(), state.versionCount(), state.feedUpdated(), unconfirmed);
     }
 
     private static NormalisedDate exact(Instant instant) {

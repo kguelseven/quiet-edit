@@ -16,6 +16,11 @@ import java.util.UUID;
  * <p>{@code etag} and {@code lastModified} are kept as the raw header values the
  * server sent. They are only ever echoed back in conditional requests, so
  * parsing them would add a failure mode without buying anything.
+ *
+ * <p>{@code unconfirmedUpdatedClaims} is the only field here that is not a fact
+ * about the last poll: it is what {@link RecheckPolicy} reads to decide whether this
+ * publisher's {@code updated} dates are still worth acting on. Maintained by
+ * {@link UpdatedClaimLog}, and its meaning is spelled out there.
  */
 @Entity
 @Table(name = "feed")
@@ -44,6 +49,9 @@ public class Feed {
 
     @Column(nullable = false)
     private boolean active = true;
+
+    @Column(name = "unconfirmed_updated_claims", nullable = false)
+    private int unconfirmedUpdatedClaims;
 
     protected Feed() {
         // for JPA
@@ -112,5 +120,13 @@ public class Feed {
 
     public void setActive(boolean active) {
         this.active = active;
+    }
+
+    public int getUnconfirmedUpdatedClaims() {
+        return unconfirmedUpdatedClaims;
+    }
+
+    public void setUnconfirmedUpdatedClaims(int unconfirmedUpdatedClaims) {
+        this.unconfirmedUpdatedClaims = unconfirmedUpdatedClaims;
     }
 }
