@@ -64,6 +64,7 @@ public class IngestController {
                     new ArticleSummary(
                             run.checked(),
                             run.count(ArticleIngestOutcome.NEW),
+                            run.count(ArticleIngestOutcome.CHANGED),
                             run.count(ArticleIngestOutcome.UNCHANGED),
                             run.count(ArticleIngestOutcome.SKIPPED),
                             run.count(ArticleIngestOutcome.FAILED),
@@ -85,8 +86,8 @@ public class IngestController {
      * article budget did not fetch -- the first to be picked up next run, the second
      * for good -- so {@code checked - deferred - abandoned} is what was fetched.
      */
-    public record ArticleSummary(int checked, long created, long unchanged, long skipped, long failed,
-                                 long deferred, long abandoned) {
+    public record ArticleSummary(int checked, long created, long changed, long unchanged, long skipped,
+                                 long failed, long deferred, long abandoned) {
     }
 
     public record FeedItem(
@@ -112,6 +113,8 @@ public class IngestController {
             String canonicalUrl,
             ArticleIngestOutcome outcome,
             UUID documentId,
+            UUID versionId,
+            int versionNumber,
             int paragraphs,
             String encoding,
             String reason) {
@@ -123,7 +126,8 @@ public class IngestController {
          */
         static ArticleItem of(ArticleIngestResult article) {
             return new ArticleItem(article.link(), article.finalUrl(), article.canonicalUrl(),
-                    article.outcome(), article.documentId(), article.paragraphs(),
+                    article.outcome(), article.documentId(), article.versionId(), article.versionNumber(),
+                    article.paragraphs(),
                     article.encoding() == null ? null : article.encoding().describe(), article.reason());
         }
     }

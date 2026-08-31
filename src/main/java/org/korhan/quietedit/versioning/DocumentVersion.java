@@ -21,6 +21,13 @@ import java.util.UUID;
  * One observed revision of a document. Immutable and append-only once written:
  * a later observation never updates a version, it adds one.
  *
+ * <p>That is not a convention this class is trusted to keep. Since Flyway V4 the
+ * table rejects every {@code UPDATE} and {@code DELETE} outright, because a version
+ * is the evidence for the claim "the article used to read like this" and evidence
+ * that can be edited afterwards proves nothing. The entity is therefore written once
+ * and only ever read back; it has no setters for the fields that carry the
+ * observation, and the few it does have exist for values decided at write time.
+ *
  * <p>The paragraph list is stored as jsonb rather than a child table because a
  * version is only ever read and written whole; a join table would buy queryable
  * paragraphs that nothing needs and cost an ordering column plus N inserts per
@@ -45,9 +52,14 @@ import java.util.UUID;
 @Entity
 @Table(
         name = "document_version",
-        uniqueConstraints = @UniqueConstraint(
-                name = "uq_document_version_document_content",
-                columnNames = {"document_id", "content_hash"}))
+        uniqueConstraints = {
+                @UniqueConstraint(
+                        name = "uq_document_version_document_content",
+                        columnNames = {"document_id", "content_hash"}),
+                @UniqueConstraint(
+                        name = "uq_document_version_number",
+                        columnNames = {"document_id", "version_number"})
+        })
 public class DocumentVersion {
 
     @Id
@@ -56,6 +68,15 @@ public class DocumentVersion {
 
     @Column(name = "document_id", nullable = false)
     private UUID documentId;
+
+    /**
+     * Position in this document's history, 1 for the first observation. Unique per
+     * document in the schema, which is what makes two writers appending the same
+     * "next" revision a failed insert rather than a version count that quietly
+     * stops matching the history.
+     */
+    @Column(name = "version_number", nullable = false)
+    private int versionNumber;
 
     @Column(name = "fetched_at", nullable = false)
     private Instant fetchedAt;
@@ -113,11 +134,13 @@ public class DocumentVersion {
 
     public DocumentVersion(
             UUID documentId,
+            int versionNumber,
             Instant fetchedAt,
             List<String> paragraphs,
             String contentHash,
             int httpStatus) {
         this.documentId = documentId;
+        this.versionNumber = versionNumber;
         this.fetchedAt = fetchedAt;
         this.paragraphs = paragraphs;
         this.contentHash = contentHash;
@@ -130,6 +153,10 @@ public class DocumentVersion {
 
     public UUID getDocumentId() {
         return documentId;
+    }
+
+    public int getVersionNumber() {
+        return versionNumber;
     }
 
     public Instant getFetchedAt() {

@@ -16,9 +16,11 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.korhan.quietedit.PostgresTestContainerConfig;
+import org.korhan.quietedit.support.TestDatabase;
 import org.korhan.quietedit.versioning.CharsetSource;
 import org.korhan.quietedit.versioning.Document;
 import org.korhan.quietedit.versioning.DocumentRepository;
+import org.korhan.quietedit.versioning.DocumentVersion;
 import org.korhan.quietedit.versioning.DocumentVersionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -57,6 +59,9 @@ class IngestRunTest {
     static {
         server.start();
     }
+
+    @Autowired
+    private TestDatabase database;
 
     @Autowired
     private IngestService ingestService;
@@ -99,9 +104,7 @@ class IngestRunTest {
     @BeforeEach
     void reset() {
         server.resetAll();
-        documents.deleteAll();
-        attempts.deleteAll();
-        feeds.deleteAll();
+        database.reset();
         server.stubFor(get("/robots.txt").willReturn(aResponse().withStatus(404)));
     }
 
@@ -171,10 +174,22 @@ class IngestRunTest {
                 .containsExactlyInAnyOrder(canonical("/steuerreform"), canonical("/leitartikel"));
         Document document = documents.findByCanonicalUrl(canonical("/steuerreform")).orElseThrow();
         assertThat(document.getFeedId()).isEqualTo(feeds.findByUrl(url("/press.xml")).orElseThrow().getId());
-        assertThat(document.getVersionCount()).isZero();
+        assertThat(document.getVersionCount()).isEqualTo(1);
+        // Nothing to differ from yet, so the first observation is not a change.
+        assertThat(document.getLastChangedAt()).isNull();
 
-        // Scope boundary: orchestration establishes identity, the version store does not exist yet.
-        assertThat(versions.count()).isZero();
+        // Every usable article was versioned, and nothing else was.
+        assertThat(versions.count()).isEqualTo(2);
+        DocumentVersion version = versions
+                .findByDocumentIdAndVersionNumber(document.getId(), 1).orElseThrow();
+        assertThat(version.getPageTitle()).isEqualTo("Steuerreform beschlossen");
+        assertThat(version.getParagraphs()).hasSize(2);
+        assertThat(version.getContentHash()).hasSize(64);
+        assertThat(version.getRawHtmlRef()).isEqualTo(ingested.rawHtmlRef());
+        assertThat(version.getHttpStatus()).isEqualTo(200);
+        assertThat(version.getEncoding()).isEqualTo(ingested.encoding());
+        assertThat(ingested.versionId()).isEqualTo(version.getId());
+        assertThat(ingested.versionNumber()).isEqualTo(1);
     }
 
     @Test
@@ -191,11 +206,18 @@ class IngestRunTest {
 
         assertThat(second.catalog().added()).isZero();
         assertThat(second.count(ArticleIngestOutcome.NEW)).isZero();
+        assertThat(second.count(ArticleIngestOutcome.CHANGED)).isZero();
         assertThat(second.count(ArticleIngestOutcome.UNCHANGED)).isEqualTo(1);
         assertThat(documents.count()).isEqualTo(1);
 
         Document document = documents.findByCanonicalUrl(canonical("/steuerreform")).orElseThrow();
         assertThat(document.getLastCheckedAt()).isAfterOrEqualTo(document.getFirstSeenAt());
+
+        // The page did not move, so the second look added no revision and changed nothing.
+        assertThat(versions.count()).isEqualTo(1);
+        assertThat(document.getVersionCount()).isEqualTo(1);
+        assertThat(document.getLastChangedAt()).isNull();
+        assertThat(article(second, "/steuerreform").versionNumber()).isEqualTo(1);
     }
 
     @Test
@@ -343,6 +365,40 @@ class IngestRunTest {
         assertThat(item.encoding()).isEqualTo("UTF-8 (document declaration), with replacement characters");
     }
 
+    /**
+     * The whole point of the system, end to end: an article whose text moves between
+     * two runs gains a revision, and both revisions stay readable in full.
+     */
+    @Test
+    void anEditedArticleGainsARevisionAndKeepsTheOldOne() {
+        server.stubFor(get("/broken.xml").willReturn(aResponse().withStatus(500)));
+        server.stubFor(get("/press.xml").willReturn(ok(feedBody("Press", "/steuerreform"))));
+        server.stubFor(get("/wire.xml").willReturn(ok(feedBody("Wire"))));
+        server.stubFor(get("/steuerreform").willReturn(articlePage("Steuerreform beschlossen")));
+
+        IngestRun first = ingestService.runOnce();
+        assertThat(first.count(ArticleIngestOutcome.NEW)).isEqualTo(1);
+
+        server.stubFor(get("/steuerreform").willReturn(articlePage("Steuerreform gescheitert")));
+        IngestRun second = ingestService.runOnce();
+
+        assertThat(second.count(ArticleIngestOutcome.CHANGED)).isEqualTo(1);
+        assertThat(second.count(ArticleIngestOutcome.UNCHANGED)).isZero();
+        assertThat(second.count(ArticleIngestOutcome.NEW)).isZero();
+        assertThat(article(second, "/steuerreform").versionNumber()).isEqualTo(2);
+
+        Document document = documents.findByCanonicalUrl(canonical("/steuerreform")).orElseThrow();
+        assertThat(document.getVersionCount()).isEqualTo(2);
+        assertThat(document.getLastChangedAt()).isNotNull();
+
+        // Stored in full, not as a delta: the first headline is still there to be read.
+        List<DocumentVersion> history = versions.findByDocumentIdOrderByVersionNumberAsc(document.getId());
+        assertThat(history).extracting(DocumentVersion::getPageTitle)
+                .containsExactly("Steuerreform beschlossen", "Steuerreform gescheitert");
+        assertThat(history.getFirst().getContentHash()).isNotEqualTo(history.getLast().getContentHash());
+        assertThat(history.getFirst().getParagraphs()).hasSize(2);
+    }
+
     /** The endpoint is the same run, so it only has to agree with it. */
     @Test
     void theEndpointReportsTheSameRun() {
@@ -358,6 +414,7 @@ class IngestRunTest {
         assertThat(response.feedSummary().failed()).isEqualTo(1);
         assertThat(response.articleSummary().checked()).isEqualTo(1);
         assertThat(response.articleSummary().created()).isEqualTo(1);
+        assertThat(response.articleSummary().changed()).isZero();
         assertThat(response.feeds()).hasSize(3);
         assertThat(documents.count()).isEqualTo(1);
     }

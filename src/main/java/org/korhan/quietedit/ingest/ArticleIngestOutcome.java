@@ -4,19 +4,31 @@ package org.korhan.quietedit.ingest;
  * How one article link ended in a run. Exactly one outcome per link the run
  * planned for, so the counts add up to the number of links it planned for.
  *
- * <p>{@link #NEW} and {@link #UNCHANGED} are statements about <em>identity</em>,
- * not about content: this ticket's boundary stops before versioning, so a run can
- * only say whether it had seen this canonical URL before, not whether the text
- * behind it moved. Once the content hash and the version store exist, "unchanged"
- * becomes the stronger claim it sounds like -- the same article, same text -- and
- * a third outcome for "known document, changed text" joins it.
+ * <p>{@link #NEW}, {@link #CHANGED} and {@link #UNCHANGED} are statements about
+ * content, not merely about identity: each one is the version store's verdict on
+ * the article's text, reached by comparing its content hash against the newest
+ * stored revision.
  */
 public enum ArticleIngestOutcome {
 
-    /** Fetched, prose extracted, and the canonical URL had never been seen before. */
+    /**
+     * Fetched, prose extracted, and the canonical URL had never been seen before.
+     * Its first revision was stored.
+     */
     NEW,
 
-    /** Fetched, prose extracted, and the document was already known. */
+    /**
+     * A known document whose text differs from the last revision stored for it: a
+     * new revision was appended. This is the outcome the whole system exists to
+     * produce.
+     */
+    CHANGED,
+
+    /**
+     * A known document whose text is the one already on record. Nothing was
+     * written, which is the normal result of a re-check and by far the most common
+     * outcome of a run.
+     */
     UNCHANGED,
 
     /**
