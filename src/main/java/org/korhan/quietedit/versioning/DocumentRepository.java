@@ -97,5 +97,51 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
             order by d.lastChangedAt desc nulls last, d.id asc
             """)
     List<DocumentHistorySummary> changedDocuments(Limit limit);
+
+    /**
+     * The same listing, narrowed by the filters the reading interface offers, with the
+     * newest revision itself rather than a summary of it.
+     *
+     * <p>One query with three predicates rather than a {@code Specification} or a method
+     * per combination: the combinations are what the interface actually asks for, and
+     * all three are cheap to express as long as no parameter is ever compared against
+     * nothing.
+     *
+     * <p>That last part is the reason for the shape of the feed predicate.
+     * {@code :feedId is null or d.feedId = :feedId} is the obvious spelling and it does
+     * not work: Hibernate renders the parameter twice, and the occurrence standing alone
+     * in {@code ? is null} reaches Postgres with no type context, which refuses the
+     * statement with "could not determine data type of parameter". Folding the optional
+     * value into a {@code coalesce} against the column it filters leaves one occurrence,
+     * typed by the column beside it, and a null then compares the column with itself --
+     * which is every row, and so no filter at all.
+     *
+     * <p>{@code changedSince} needs no such trick because it has a lower bound that is
+     * always meaningful: the caller passes the epoch for "any time" rather than a null.
+     * {@code minVersions} likewise has a floor -- a document with one revision has not
+     * changed, which is the {@code versionCount > 1} this listing is defined by -- so a
+     * lower value cannot widen it.
+     *
+     * @param feedId       keep only documents of this feed, or null for all feeds
+     * @param changedSince keep only documents touched at or after this instant
+     * @param minVersions  keep only documents with at least this many revisions
+     */
+    @Query("""
+            select new org.korhan.quietedit.versioning.ChangedDocumentRow(d, v)
+            from Document d
+              join DocumentVersion v on v.documentId = d.id
+            where d.versionCount > 1
+              and v.versionNumber = (select max(v2.versionNumber)
+                                     from DocumentVersion v2
+                                     where v2.documentId = d.id)
+              and d.feedId = coalesce(:feedId, d.feedId)
+              and coalesce(d.lastChangedAt, d.firstSeenAt) >= :changedSince
+              and d.versionCount >= :minVersions
+            order by d.lastChangedAt desc nulls last, d.id asc
+            """)
+    List<ChangedDocumentRow> changedDocumentsFiltered(@Param("feedId") UUID feedId,
+                                                      @Param("changedSince") Instant changedSince,
+                                                      @Param("minVersions") int minVersions,
+                                                      Limit limit);
 }
 

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('diff')}"></head>
+<body>
+<header th:replace="~{fragments :: masthead}"></header>
+
+<main>
+    <nav class="crumbs"><a th:href="@{/}">&larr; all changed articles</a></nav>
+
+    <h1 th:text="${view.headline} ?: '(no headline extracted)'">headline</h1>
+    <p class="source">
+        <a th:href="${view.canonicalUrl}" rel="noreferrer noopener" target="_blank"
+           th:text="${view.canonicalUrl}">url</a>
+        <span class="muted" th:text="${view.host}">host</span>
+    </p>
+
+    <section class="revisions">
+        <div class="side">
+            <h2>Revision <span th:text="${view.from.number}">1</span></h2>
+            <dl>
+                <dt>fetched</dt><dd th:text="${view.from.fetchedAt}"></dd>
+                <dt>published</dt><dd th:text="${view.from.publishedAt} ?: '-'"></dd>
+                <dt>paragraphs</dt><dd th:text="${view.from.paragraphs}"></dd>
+                <dt>encoding</dt><dd th:text="${view.from.encoding} ?: 'not recorded'"></dd>
+                <dt>hash</dt><dd class="hash" th:text="${view.from.contentHash}"></dd>
+            </dl>
+        </div>
+        <div class="side">
+            <h2>Revision <span th:text="${view.to.number}">2</span></h2>
+            <dl>
+                <dt>fetched</dt><dd th:text="${view.to.fetchedAt}"></dd>
+                <dt>published</dt><dd th:text="${view.to.publishedAt} ?: '-'"></dd>
+                <dt>paragraphs</dt><dd th:text="${view.to.paragraphs}"></dd>
+                <dt>encoding</dt><dd th:text="${view.to.encoding} ?: 'not recorded'"></dd>
+                <dt>hash</dt><dd class="hash" th:text="${view.to.contentHash}"></dd>
+            </dl>
+        </div>
+    </section>
+
+    <!-- Every adjacent pair of this document, so the history is walkable from here. -->
+    <nav class="pairs" th:if="${#lists.size(view.pairs) > 1}">
+        <span class="muted">other revisions:</span>
+        <a th:each="pair : ${view.pairs}"
+           th:href="@{/documents/{id}/diff(id=${view.documentId},from=${pair.from},to=${pair.to})}"
+           th:classappend="${pair.current} ? 'current'"
+           th:text="|${pair.from} &rarr; ${pair.to}|">1 &rarr; 2</a>
+    </nav>
+
+    <!-- The headline is called out above the body: a retitled article is its own
+         editorial event, not the first of twenty paragraph rows. -->
+    <section th:if="${view.title != null}" class="change title-change">
+        <h2>The headline changed</h2>
+        <p class="before"><span th:replace="~{fragments :: marked(${view.title.before})}"></span></p>
+        <p class="after"><span th:replace="~{fragments :: marked(${view.title.after})}"></span></p>
+    </section>
+
+    <p th:if="${view.unchanged}" class="empty">
+        These two revisions say the same thing. They were stored as two observations for
+        another reason -- a re-decode of the same bytes, say -- and nothing was edited.
+    </p>
+
+    <section class="body-changes" th:unless="${#lists.isEmpty(view.paragraphs)}">
+        <h2><span th:text="${#lists.size(view.paragraphs)}">0</span> paragraph changes</h2>
+        <article th:each="p : ${view.paragraphs}" class="change"
+                 th:classappend="'kind-' + ${p.kind.name()}">
+            <p class="meta">
+                <span class="kind" th:text="${p.kind.label()}">changed</span>
+                <span class="pos" th:if="${p.fromIndex != null and p.toIndex != null}"
+                      th:text="|&para; ${p.fromIndex} &rarr; &para; ${p.toIndex}|"></span>
+                <span class="pos" th:if="${p.fromIndex != null and p.toIndex == null}"
+                      th:text="|&para; ${p.fromIndex}|"></span>
+                <span class="pos" th:if="${p.fromIndex == null and p.toIndex != null}"
+                      th:text="|&para; ${p.toIndex}|"></span>
+            </p>
+            <p class="before" th:unless="${#lists.isEmpty(p.before)}">
+                <span th:replace="~{fragments :: marked(${p.before})}"></span>
+            </p>
+            <p class="after" th:unless="${#lists.isEmpty(p.after)}">
+                <span th:replace="~{fragments :: marked(${p.after})}"></span>
+            </p>
+        </article>
+    </section>
+</main>
+</body>
+</html>

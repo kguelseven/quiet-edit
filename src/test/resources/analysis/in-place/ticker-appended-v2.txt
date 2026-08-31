@@ -1,0 +1,12 @@
+# The same ticker one re-check later: one new entry arrived at the top and the index
+# line rolled to name it. Nothing that was already on the page was touched. This is
+# what nearly every re-check of a ticker produces, and it is the case the
+# added-paragraphs-only filter exists to hide.
+Liveticker zur Sturzflut in Nepal
+Armee birgt zwei Vermisste ++ Keine Informationen zu Schweizer Opfern
+Armee birgt zwei Vermisste
+Die Armee hat im Distrikt Sindhupalchok zwei Vermisste geborgen.
+Keine Informationen zu Schweizer Opfern
+Das EDA hat bislang keine Kenntnis von betroffenen Schweizer Staatsangehörigen.
+Nepal: Zahl der Vermissten steigt auf über 1300
+Die Behörden in Kathmandu melden über 1300 Vermisste.
