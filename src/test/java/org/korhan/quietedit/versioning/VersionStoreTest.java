@@ -202,24 +202,53 @@ class VersionStoreTest {
     }
 
     /**
-     * The known gap, asserted so it stays a decision rather than a surprise: an
-     * article that goes back to a wording it already had cannot be recorded while
-     * {@code (document_id, content_hash)} is unique. Reported, never silently
-     * swallowed and never a lost transaction -- see quietedit-cca.2.
+     * A, B, A: an article that goes back to a wording it already published moved
+     * twice, and the history says so. The third revision repeats the first one's
+     * content hash, which only the database can prove is allowed -- the unique
+     * constraint that once made this insert fail was dropped in Flyway V5.
      */
     @Test
-    void textThatReturnsToAnEarlierRevisionIsReportedRatherThanStored() {
-        store.record(documentId, observation(T0, "Fassung eins."));
+    void textThatReturnsToAnEarlierRevisionIsAppendedAsANewOne() {
+        VersionStore.Stored first = store.record(documentId, observation(T0, "Fassung eins."));
         store.record(documentId, observation(T0.plusSeconds(3600), "Fassung zwei."));
 
         VersionStore.Stored back = store.record(
                 documentId, observation(T0.plusSeconds(7200), "Fassung eins."));
 
-        assertThat(back.outcome()).isEqualTo(VersionOutcome.REVERTED);
-        assertThat(store.history(documentId)).hasSize(2);
+        assertThat(back.outcome()).isEqualTo(VersionOutcome.APPENDED);
+        assertThat(back.versionNumber()).isEqualTo(3);
+        assertThat(back.contentHash()).isEqualTo(first.contentHash());
+        assertThat(back.versionId()).isNotEqualTo(first.versionId());
+
+        List<DocumentVersion> history = store.history(documentId);
+        assertThat(history).hasSize(3);
+        assertThat(history.getLast().getContentHash()).isEqualTo(history.getFirst().getContentHash());
+        assertThat(history.get(1).getContentHash()).isNotEqualTo(first.contentHash());
+
         Document document = documents.findById(documentId).orElseThrow();
-        assertThat(document.getVersionCount()).isEqualTo(2);
-        assertThat(document.getLastChangedAt()).isEqualTo(T0.plusSeconds(3600));
+        assertThat(document.getVersionCount()).isEqualTo(3);
+        assertThat(document.getLastChangedAt()).isEqualTo(T0.plusSeconds(7200));
+    }
+
+    /**
+     * The rule the dropped constraint used to carry is still in force, but where it
+     * belongs: a re-fetch of text identical to the <em>newest</em> revision writes
+     * nothing, even for a document that has already been observed to revert.
+     */
+    @Test
+    void unchangedTextStillAppendsNothingAfterARevert() {
+        store.record(documentId, observation(T0, "Fassung eins."));
+        store.record(documentId, observation(T0.plusSeconds(3600), "Fassung zwei."));
+        store.record(documentId, observation(T0.plusSeconds(7200), "Fassung eins."));
+
+        VersionStore.Stored again = store.record(
+                documentId, observation(T0.plusSeconds(10800), "Fassung eins."));
+
+        assertThat(again.outcome()).isEqualTo(VersionOutcome.UNCHANGED);
+        assertThat(again.versionNumber()).isEqualTo(3);
+        assertThat(store.history(documentId)).hasSize(3);
+        assertThat(documents.findById(documentId).orElseThrow().getLastChangedAt())
+                .isEqualTo(T0.plusSeconds(7200));
     }
 
     private static Observation observation(Instant fetchedAt, String paragraph) {

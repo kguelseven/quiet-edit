@@ -1,7 +1,6 @@
 package org.korhan.quietedit.ingest;
 
 import org.korhan.quietedit.versioning.EncodingVerdict;
-import org.korhan.quietedit.versioning.VersionOutcome;
 import org.korhan.quietedit.versioning.VersionStore;
 
 import java.util.UUID;
@@ -49,8 +48,9 @@ public record ArticleIngestResult(
      * because "new article" and "edited article" are different events to whoever
      * reads a run.
      *
-     * <p>A revision the store could not write carries its reason, so an operator can
-     * tell "nothing happened" from "something happened that we cannot record".
+     * <p>An article that returns to a wording it already published reads as
+     * {@link ArticleIngestOutcome#CHANGED} like any other edit: it is a move away from
+     * what the document said last, which is what the outcome claims.
      */
     static ArticleIngestResult ingested(String link, String finalUrl, String canonicalUrl, boolean created,
                                         UUID documentId, VersionStore.Stored stored, String rawHtmlRef,
@@ -58,11 +58,8 @@ public record ArticleIngestResult(
         ArticleIngestOutcome outcome = created
                 ? ArticleIngestOutcome.NEW
                 : stored.appended() ? ArticleIngestOutcome.CHANGED : ArticleIngestOutcome.UNCHANGED;
-        String reason = stored.outcome() == VersionOutcome.REVERTED
-                ? "text returned to an earlier revision and could not be stored"
-                : null;
         return new ArticleIngestResult(link, finalUrl, canonicalUrl, outcome, documentId,
-                stored.versionId(), stored.versionNumber(), rawHtmlRef, paragraphs, encoding, reason);
+                stored.versionId(), stored.versionNumber(), rawHtmlRef, paragraphs, encoding, null);
     }
 
     static ArticleIngestResult skipped(String link, String finalUrl, String reason) {

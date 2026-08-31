@@ -28,13 +28,6 @@ public interface DocumentVersionRepository extends JpaRepository<DocumentVersion
     Optional<DocumentVersion> findFirstByDocumentIdOrderByVersionNumberDesc(UUID documentId);
 
     /**
-     * Whether this document has ever been observed with that text. Asked before an
-     * append because {@code uq_document_version_document_content} makes a returning
-     * article a failed insert rather than a new revision -- see {@link VersionStore}.
-     */
-    boolean existsByDocumentIdAndContentHash(UUID documentId, String contentHash);
-
-    /**
      * The revision that was current at {@code instant}: the newest observation not
      * later than it. Returns a list with {@code Limit.of(1)} rather than an
      * {@code Optional} because the limit is the caller's, not the query's.

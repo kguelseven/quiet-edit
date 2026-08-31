@@ -34,10 +34,12 @@ import java.util.UUID;
  * observation.
  *
  * <p>{@code contentHash} is {@code char(64)} — a hex-encoded SHA-256 — and is
- * unique per document, which is what makes "unchanged content produces no new
- * version" a database guarantee rather than a convention. {@code simhash} is the
- * near-duplicate counterpart and stays nullable: it is only meaningful once a
- * fingerprinting strategy exists.
+ * deliberately not unique per document: an article that returns to a wording it
+ * already published changed twice, and both moves are part of its history. "Unchanged
+ * content produces no new version" is a comparison against the newest revision and
+ * lives in {@link VersionStore}; see Flyway V5. {@code simhash} is the near-duplicate
+ * counterpart and stays nullable: it is only meaningful once a fingerprinting strategy
+ * exists.
  *
  * <p>{@code rawHtmlRef} holds a path or storage key, never the HTML. Keeping
  * megabytes of markup out of the row keeps the version table scannable.
@@ -52,14 +54,9 @@ import java.util.UUID;
 @Entity
 @Table(
         name = "document_version",
-        uniqueConstraints = {
-                @UniqueConstraint(
-                        name = "uq_document_version_document_content",
-                        columnNames = {"document_id", "content_hash"}),
-                @UniqueConstraint(
-                        name = "uq_document_version_number",
-                        columnNames = {"document_id", "version_number"})
-        })
+        uniqueConstraints = @UniqueConstraint(
+                name = "uq_document_version_number",
+                columnNames = {"document_id", "version_number"}))
 public class DocumentVersion {
 
     @Id
