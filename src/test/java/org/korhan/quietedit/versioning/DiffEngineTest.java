@@ -121,6 +121,63 @@ class DiffEngineTest {
         });
     }
 
+    /**
+     * The goldset case: the first silent edit the system found in the wild. Both blocks
+     * have to be reported as edits, because a removal plus an addition would tell a
+     * reader the subheading was deleted and an unrelated one written, which is not
+     * what 20min.ch did.
+     */
+    @Test
+    @DisplayName("the 20min.ch correction is a changed subheading plus a changed paragraph")
+    void wohnattraktivitaetCorrectionIsTwoEdits() {
+        List<ParagraphChange> paragraphs =
+                diff("wohnattraktivitaet-published.txt", "wohnattraktivitaet-corrected.txt").paragraphs();
+
+        assertThat(paragraphs).allMatch(ParagraphChange.Changed.class::isInstance, "all changed");
+        assertThat(paragraphs).hasSize(2);
+        assertThat(paragraphs.getFirst()).isInstanceOfSatisfying(ParagraphChange.Changed.class, subheading -> {
+            assertThat(subheading.fromText()).isEqualTo("Über 2000 Gemeinden sind attraktiv");
+            assertThat(subheading.toText()).isEqualTo("Zwei Drittel aller Gemeinden sind gut");
+            assertThat(subheading.fromIndex()).isEqualTo(subheading.toIndex());
+        });
+        assertThat(paragraphs.get(1)).isInstanceOfSatisfying(ParagraphChange.Changed.class, body -> {
+            assertThat(body.fromText()).startsWith("Mehr als 2000 oder über zwei Drittel aller Gemeinden");
+            assertThat(body.toText()).startsWith("Über zwei Drittel der mehr als 2000 Gemeinden");
+        });
+    }
+
+    /**
+     * The bar drops only for a pair in one slot of a balanced replacement. A slot
+     * refilled with something unrelated shares no words and must stay two entries --
+     * that case is {@link #unrelatedReplacementIsNotPairedAsAnEdit}.
+     */
+    @Test
+    @DisplayName("a short block replaced in place pairs on a third of its words")
+    void inSlotReplacementPairsBelowTheCrossSlotBar() {
+        assertThat(diffOfSingleParagraph("Über 2000 Gemeinden sind attraktiv",
+                "Zwei Drittel aller Gemeinden sind gut"))
+                .singleElement().isInstanceOf(ParagraphChange.Changed.class);
+    }
+
+    /**
+     * The lower bar must not travel: the same two texts in different slots of an
+     * unbalanced run have no positional correspondence to appeal to, so the full
+     * cross-slot bar applies and they are not claimed to be related.
+     */
+    @Test
+    @DisplayName("the lower bar does not apply across slots")
+    void crossSlotPairingStillNeedsHalfTheWords() {
+        DocumentDiff diff = engine.diff(
+                new ArticleContent("Titel", List.of("Über 2000 Gemeinden sind attraktiv")),
+                new ArticleContent("Titel", List.of("Der Entwurf liegt vor und wurde vorgelegt.",
+                        "Zwei Drittel aller Gemeinden sind gut")));
+
+        assertThat(diff.paragraphs())
+                .hasAtLeastOneElementOfType(ParagraphChange.Removed.class)
+                .hasAtLeastOneElementOfType(ParagraphChange.Added.class)
+                .noneMatch(ParagraphChange.Changed.class::isInstance);
+    }
+
     @Test
     @DisplayName("half the words surviving is enough to pair two paragraphs as an edit")
     void similarityAtTheThresholdPairs() {

@@ -68,4 +68,34 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
                                                       @Param("stableWindowStart") Instant stableWindowStart,
                                                       @Param("widestWindowStart") Instant widestWindowStart,
                                                       Limit limit);
+
+    /**
+     * Documents observed to change at least once, most recently changed first -- the
+     * list an operator scans to find an edit worth looking at.
+     *
+     * <p>{@code versionCount > 1} rather than {@code lastChangedAt is not null} because
+     * the count is what the version store sets by construction from the revision's own
+     * ordinal; the timestamp is set in the same transaction, so the two agree, and the
+     * count is the condition the ticket asks for.
+     *
+     * <p>The entity join reaches the newest revision through a correlated {@code max}
+     * rather than through {@code d.versionCount}: the counter is denormalised, and a
+     * listing that silently returned no row for a document whose counter had drifted
+     * would hide exactly the document worth seeing. {@code nulls last} and the id
+     * tie-break keep the order total, so paging by limit is stable.
+     */
+    @Query("""
+            select new org.korhan.quietedit.versioning.DocumentHistorySummary(
+                d.id, d.canonicalUrl, d.feedId, d.firstSeenAt, d.lastCheckedAt, d.lastChangedAt,
+                d.versionCount, v.versionNumber, v.pageTitle)
+            from Document d
+              join DocumentVersion v on v.documentId = d.id
+            where d.versionCount > 1
+              and v.versionNumber = (select max(v2.versionNumber)
+                                     from DocumentVersion v2
+                                     where v2.documentId = d.id)
+            order by d.lastChangedAt desc nulls last, d.id asc
+            """)
+    List<DocumentHistorySummary> changedDocuments(Limit limit);
 }
+

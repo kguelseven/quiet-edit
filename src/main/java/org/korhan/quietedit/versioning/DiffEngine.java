@@ -51,12 +51,13 @@ import java.util.regex.Pattern;
  *       Run first, so a paragraph that merely travelled is never spent on a
  *       similarity match with something else.</li>
  *   <li><b>Similar text</b> -- a {@link ParagraphChange.Changed}, carrying the
- *       word-level detail. Each unmatched removal takes its best remaining
- *       counterpart.</li>
+ *       word-level detail. Each unmatched removal takes the best remaining
+ *       counterpart that clears the overlap bar for that pair, which is lower when
+ *       the two sit in the same slot of a balanced replacement.</li>
  * </ol>
  * What is left over is an outright removal or addition.
  *
- * <h2>Thresholds, and why this value</h2>
+ * <h2>Thresholds, and why these values</h2>
  * Two paragraphs are paired as an edit at a word overlap of
  * {@value #MIN_SIMILARITY} or more, measured as {@code 2 * unchanged words /
  * (words before + words after)} -- the share of the pair that survived. Half is the
@@ -68,6 +69,28 @@ import java.util.regex.Pattern;
  * specific -- while the failure it avoids, a bogus pairing, hands the classifier a
  * fabricated edit.
  *
+ * <p>A pair that was replaced <em>in its own slot</em> needs only
+ * {@value #MIN_IN_SLOT_SIMILARITY} of its words to survive, because there the word
+ * overlap is no longer the only evidence. A balanced replacement -- a run of n
+ * blocks replaced by n blocks, with the paragraphs on both sides of the run
+ * identical -- carries a positional correspondence of its own: the i-th block of
+ * the old run occupies the slot the i-th block of the new run now holds. Word
+ * overlap then only has to rule out the case that the slot was refilled with
+ * something else entirely, which is what a wholesale replacement looks like: no
+ * shared words at all.
+ *
+ * <p>The value comes from the observed pairs, not from first principles. The edit
+ * this system was built to catch -- 20min.ch correcting the subheading "Über 2000
+ * Gemeinden sind attraktiv" to "Zwei Drittel aller Gemeinden sind gut" four minutes
+ * after publication -- survives at 0.36, because a six-word subheading rewritten to
+ * make a different claim keeps almost nothing while still plainly being the same
+ * subheading. That is the general problem with short blocks: at five words one
+ * changed word already costs 0.2, so the half-share bar that fits a paragraph
+ * effectively forbids pairing a heading at all, and this engine cannot tell a
+ * heading from a paragraph -- {@link ArticleContent} carries no block kinds. Below
+ * a third, the observed non-pairs sit at 0.25 and lower. The margin between the two
+ * is thin and is named as a weakness below.
+ *
  * <h2>Known weaknesses</h2>
  * <ul>
  *   <li>Two paragraphs with identical text (a repeated disclaimer, a stock sentence)
@@ -77,6 +100,14 @@ import java.util.regex.Pattern;
  *   <li>A paragraph that was split in two, or two that were merged into one, is not
  *       recognised as such: the halves match the whole only if one of them clears the
  *       similarity bar, and the rest is reported as an addition or a removal.</li>
+ *   <li>The lower in-slot bar is calibrated, not derived, and the gap it sits in is
+ *       narrow: 0.36 for the correction it exists to catch, 0.25 for the closest
+ *       observed non-pair. Two unrelated short blocks that replace each other in
+ *       place and happen to share a third of their words -- two subheadings both
+ *       ending "sind gut" -- are paired as an edit. The claim is still bounded by
+ *       the slot: it says the block in that position was rewritten, which is true
+ *       of the position even when the two texts have nothing to do with each
+ *       other.</li>
  *   <li>Pairing is greedy in reading order, not globally optimal. A later removal
  *       could in principle have been a better counterpart for an addition already
  *       taken. Global assignment would cost determinism-by-inspection for a gain that
@@ -95,6 +126,9 @@ import java.util.regex.Pattern;
 public class DiffEngine {
 
     static final double MIN_SIMILARITY = 0.5;
+
+    /** The bar for a pair that replaced each other in place; see the class comment. */
+    static final double MIN_IN_SLOT_SIMILARITY = 1.0 / 3;
 
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
@@ -151,17 +185,20 @@ public class DiffEngine {
         Patch<String> patch = DiffUtils.diff(folded(from), folded(to));
         List<Candidate> removed = new ArrayList<>();
         List<Candidate> added = new ArrayList<>();
+        int deltaIndex = 0;
         for (AbstractDelta<String> delta : patch.getDeltas()) {
             Chunk<String> source = delta.getSource();
             Chunk<String> target = delta.getTarget();
+            boolean balanced = source.size() == target.size();
             for (int i = 0; i < source.size(); i++) {
                 removed.add(new Candidate(from.get(source.getPosition() + i),
-                        source.getPosition() + i, target.getPosition()));
+                        source.getPosition() + i, target.getPosition(), deltaIndex, i, balanced));
             }
             for (int i = 0; i < target.size(); i++) {
                 added.add(new Candidate(to.get(target.getPosition() + i),
-                        source.getPosition(), target.getPosition() + i));
+                        source.getPosition(), target.getPosition() + i, deltaIndex, i, balanced));
             }
+            deltaIndex++;
         }
 
         boolean[] removedTaken = new boolean[removed.size()];
@@ -214,13 +251,16 @@ public class DiffEngine {
                     continue;
                 }
                 // Strictly greater, so equally good candidates resolve to the earliest.
+                // The bar is per pair, not per removal, so a weaker candidate in the
+                // removal's own slot can win over a stronger one that fails the higher
+                // cross-slot bar.
                 double similarity = similarity(before, words(added.get(a).block().text()));
-                if (similarity > bestSimilarity) {
+                if (similarity > bestSimilarity && similarity >= minSimilarity(removed.get(r), added.get(a))) {
                     bestSimilarity = similarity;
                     best = a;
                 }
             }
-            if (best < 0 || bestSimilarity < MIN_SIMILARITY) {
+            if (best < 0) {
                 continue;
             }
             removedTaken[r] = true;
@@ -249,6 +289,27 @@ public class DiffEngine {
                         new ParagraphChange.Added(candidate.block().index(), candidate.block().text())));
             }
         }
+    }
+
+    /**
+     * How much of the pair has to survive for it to be called an edit. Lower for two
+     * blocks that replaced each other in place, where the position is evidence of its
+     * own; see the class comment for the reasoning and the calibration.
+     */
+    private static double minSimilarity(Candidate removed, Candidate added) {
+        return inSameSlot(removed, added) ? MIN_IN_SLOT_SIMILARITY : MIN_SIMILARITY;
+    }
+
+    /**
+     * True when a run of n blocks was replaced by n blocks and these two hold the same
+     * offset in it. Both conditions matter: an unbalanced run has no offset-to-offset
+     * correspondence to appeal to, and two different offsets inside a balanced one are
+     * two different slots.
+     */
+    private static boolean inSameSlot(Candidate removed, Candidate added) {
+        return removed.balanced()
+                && removed.deltaIndex() == added.deltaIndex()
+                && removed.deltaOffset() == added.deltaOffset();
     }
 
     /**
@@ -326,8 +387,14 @@ public class DiffEngine {
      * A paragraph inside a differing run, with both positions the diff gave it: its own
      * index on its side, and where the run sits on the other. The second is what lets a
      * lone removal be sorted into the later version's reading order.
+     *
+     * <p>{@code deltaIndex}, {@code deltaOffset} and {@code balanced} describe the run
+     * it came out of rather than the paragraph itself, and exist so the edit pass can
+     * ask whether two candidates share a slot. They are not positions in either
+     * version and never reach the result.
      */
-    private record Candidate(Block block, int sourcePosition, int targetPosition) {
+    private record Candidate(Block block, int sourcePosition, int targetPosition,
+                             int deltaIndex, int deltaOffset, boolean balanced) {
     }
 
     private record Ranked(int targetPosition, int sourcePosition, int rank, ParagraphChange change) {
