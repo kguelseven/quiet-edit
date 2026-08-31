@@ -1,6 +1,7 @@
 package org.korhan.quietedit.ingest;
 
 import org.jsoup.Jsoup;
+import org.jsoup.nodes.Attribute;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
@@ -34,13 +35,26 @@ import java.util.regex.Pattern;
  *       is what keeps that removal safe.</li>
  *   <li><b>Prune by structure, then by name.</b> Tags that cannot carry prose
  *       ({@code script}, {@code form}, {@code nav}, {@code aside}, {@code figure},
- *       ...) go first, then elements whose class or id names them as furniture.</li>
+ *       ...) go first, then elements whose class, id or {@code data-*} attributes
+ *       name them as furniture.</li>
  *   <li><b>Pick one content root</b> -- declared by the publisher if possible,
  *       otherwise the densest container.</li>
  *   <li><b>Prune by name once more inside that root, then collect its prose
  *       blocks.</b> The second pass is what removes a related-stories box that the
- *       first had to spare.</li>
+ *       first had to spare; a trailing run of short headings goes with it, because
+ *       an emptied box leaves its caption behind.</li>
  * </ol>
+ *
+ * <h2>Where a page says what a block is</h2>
+ * Class and id are the first place, and on a page built with utility CSS they are
+ * the wrong place: nothing but Tailwind classes reaches the containers, and the
+ * functional label sits in a {@code data-*} attribute the analytics layer needs.
+ * NZZ names a recommendation rail {@code data-ct-type="teaser container title"} and
+ * its games strip {@code data-source-element-widget="Widget-Slider"} while their
+ * class attributes say only how they are painted. Those values are therefore read
+ * as names too -- but only outside a declared content root, and only when the value
+ * looks like a name rather than a payload. Both restrictions are false-positive
+ * guards, spelled out at {@link #namedAsBoilerplate} and {@link #declaredNames}.
  *
  * <h2>Why the publisher's own markup decides the content root</h2>
  * When a page declares {@code [itemprop=articleBody]}, {@code <article>},
@@ -73,9 +87,15 @@ import java.util.regex.Pattern;
  *
  * <h2>Known weaknesses</h2>
  * <ul>
- *   <li>The class and id vocabulary is curated (English and German) and will miss
- *       a newsroom that names its furniture differently. The failure is visible
- *       rather than silent: the extra block shows up in the extraction fixture.</li>
+ *   <li>The vocabulary is curated (English and German) and will miss a newsroom
+ *       that names its furniture differently. The failure is visible rather than
+ *       silent: the extra block shows up in the extraction fixture.</li>
+ *   <li>A ticker or liveblog whose last entries carry a headline but no body loses
+ *       those headlines to the trailing-heading rule, which cannot tell them from
+ *       the caption of an emptied rail. Measured on the stored captures this costs
+ *       four of forty-four blocks on a watson.ch transfer ticker, and nothing on
+ *       any other page; the loss is deterministic, so it hides a later edit to
+ *       those headlines rather than inventing one.</li>
  *   <li>The same vocabulary matched against a whole element name could remove real
  *       content: a body wrapper called {@code content-share-wrapper} names itself
  *       like furniture. Token matching (split on separators and camel-case
@@ -108,6 +128,7 @@ public class ArticleExtractor {
     static final int MIN_HEADING_CHARS = 3;
     static final int MAX_LABEL_CHARS = 80;
     static final double MAX_LINK_DENSITY = 0.5;
+    static final int MAX_ATTRIBUTE_VALUE_CHARS = 100;
 
     /**
      * Containers a publisher declares to be the article, in the order they are
@@ -208,6 +229,15 @@ public class ArticleExtractor {
     /** Splits {@code article_related-box} and {@code articleRelatedBox} alike. */
     private static final Pattern TOKEN_BOUNDARY =
             Pattern.compile("[^\\p{Alnum}]+|(?<=[\\p{Lower}\\p{Digit}])(?=\\p{Upper})");
+
+    /**
+     * Characters that mark a {@code data-*} value as a payload rather than a name:
+     * a URL, a JSON blob, embedded markup. Such a value is skipped, because the
+     * words inside it describe something the element merely points at -- an image
+     * path containing {@code /video/} would otherwise delete the paragraph around
+     * it.
+     */
+    private static final Pattern ATTRIBUTE_PAYLOAD = Pattern.compile("[/{}<>\"]");
 
     /**
      * @param html the fetched page, may be {@code null} or blank
@@ -336,8 +366,24 @@ public class ArticleExtractor {
         return false;
     }
 
+    /**
+     * The class and id vocabulary applies everywhere; the {@code data-*} vocabulary
+     * only outside a declared content root. Inside one, the publisher has already
+     * said which element is the article, and the same word can mean the opposite
+     * there: sueddeutsche.de marks its standfirst {@code data-manual="teaserText"},
+     * where NZZ marks a recommendation rail {@code data-ct-type="teaser container
+     * title"}. Reading {@code data-*} inside the declared article would drop the
+     * standfirst -- the very sentence a silent edit is most likely to touch.
+     */
     private boolean namedAsBoilerplate(Element element) {
-        String names = element.className() + " " + element.id();
+        if (hasBoilerplateToken(element.className() + " " + element.id())) {
+            return true;
+        }
+        String declared = declaredNames(element);
+        return !declared.isBlank() && !insideContentRoot(element) && hasBoilerplateToken(declared);
+    }
+
+    private boolean hasBoilerplateToken(String names) {
         if (names.isBlank()) {
             return false;
         }
@@ -356,6 +402,33 @@ public class ArticleExtractor {
             }
         }
         return false;
+    }
+
+    /**
+     * What the page's own {@code data-*} attributes say this block is. Analytics and
+     * testing hooks carry that statement long after the class attribute stopped
+     * carrying it: a Tailwind page has nothing but utility classes on its
+     * containers, so NZZ's recommendation rail is named only by
+     * {@code data-ct-type="teaser container title"}.
+     *
+     * <p>Attribute <em>names</em> are deliberately not read, only values: a name is
+     * chosen by the framework ({@code data-testid}), a value by the page author, and
+     * only the second describes this block.
+     */
+    private String declaredNames(Element element) {
+        StringBuilder names = new StringBuilder();
+        for (Attribute attribute : element.attributes()) {
+            if (!attribute.getKey().startsWith("data-")) {
+                continue;
+            }
+            String value = attribute.getValue();
+            if (value.isEmpty() || value.length() > MAX_ATTRIBUTE_VALUE_CHARS
+                    || ATTRIBUTE_PAYLOAD.matcher(value).find()) {
+                continue;
+            }
+            names.append(' ').append(value);
+        }
+        return names.toString();
     }
 
     /**
@@ -443,6 +516,7 @@ public class ArticleExtractor {
         Elements blocks = root.select(PROSE_BLOCKS);
         Set<Element> selectable = new HashSet<>(blocks);
         List<String> paragraphs = new ArrayList<>();
+        List<Boolean> heading = new ArrayList<>();
         for (Element block : blocks) {
             if (hasProseDescendant(block, selectable)) {
                 continue;
@@ -450,9 +524,55 @@ public class ArticleExtractor {
             String text = normalize(block.text());
             if (keep(block, text) && !text.equals(title)) {
                 paragraphs.add(text);
+                heading.add(block.is(HEADINGS));
             }
         }
+        dropTrailingHeadings(paragraphs, heading);
         return paragraphs;
+    }
+
+    /**
+     * A heading with nothing left under it is the caption of a box that pruning
+     * already emptied, not a section of the article: "Mehr zum Thema", "Neueste
+     * Artikel", "Artikel von NZZ Bellevue" are what remains once their teasers are
+     * gone. Matching them by name would need one entry per publisher, while the
+     * shape -- heading, then no prose -- is the same everywhere and needs none.
+     *
+     * <p>Three guards keep this from eating article text.
+     * <ul>
+     *   <li>Only <em>trailing</em> headings qualify. A heading in the middle of the
+     *       body is followed by prose by definition, and a rail between two halves
+     *       of an article is rare enough not to trade the risk for it.</li>
+     *   <li>Only headings of at most {@value #MAX_LABEL_CHARS} characters, the same
+     *       cut-off the named labels use. Newsrooms do put body text in a heading tag
+     *       -- 20min.ch writes the whole text of a video page into an {@code h4} --
+     *       and a block that long is prose whatever tag carries it.</li>
+     *   <li>Only while the trailing headings stay outnumbered by the paragraphs on
+     *       the page -- paragraphs, not blocks, because a heading is a label only if
+     *       there is prose it could have labelled. A page that is mostly headings is
+     *       a list and its headings are its content: a liveblog whose entry bodies
+     *       load later leaves nothing but entry titles.</li>
+     * </ul>
+     * What is left to lose is a short article that genuinely ends on a heading.
+     */
+    private void dropTrailingHeadings(List<String> paragraphs, List<Boolean> heading) {
+        int trailing = 0;
+        for (int i = paragraphs.size() - 1; i >= 0; i--) {
+            if (!heading.get(i) || paragraphs.get(i).length() > MAX_LABEL_CHARS) {
+                break;
+            }
+            trailing++;
+        }
+        int prose = 0;
+        for (int i = 0; i < paragraphs.size(); i++) {
+            if (!heading.get(i)) {
+                prose++;
+            }
+        }
+        if (trailing >= prose) {
+            return;
+        }
+        paragraphs.subList(paragraphs.size() - trailing, paragraphs.size()).clear();
     }
 
     private boolean hasProseDescendant(Element block, Set<Element> selectable) {

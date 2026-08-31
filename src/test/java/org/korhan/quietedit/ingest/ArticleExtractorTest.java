@@ -26,7 +26,9 @@ class ArticleExtractorTest {
             "bbc-style",            // teasers marked up as nested <article> elements
             "legacy-nosemantics",   // table layout, no semantic container: density fallback
             "paywall-stub",         // headline but no prose at all
-            "entity-noise");        // non-breaking spaces, soft hyphens, zero-width characters
+            "entity-noise",         // non-breaking spaces, soft hyphens, zero-width characters
+            "nzz-rails-fetch1",     // real capture: furniture named only by data-* attributes
+            "nzz-rails-fetch2");    // the same article one fetch later, different rails
 
     private final ArticleExtractor extractor = new ArticleExtractor();
 
@@ -150,6 +152,93 @@ class ArticleExtractorTest {
                 """;
 
         assertThat(extractor.extract(html).paragraphs()).containsExactly("Er schwieg.");
+    }
+
+    /**
+     * The two NZZ fixtures are the raw captures of two consecutive fetches of the
+     * same article (nzz.ch/...angelica-moser...ld.10021232). Its prose did not change
+     * between them; its "Neueste Artikel" rail did. Anything the rails contribute to
+     * the extraction is therefore a change report about an article nobody edited,
+     * which is indistinguishable from the silent edits this system exists to find.
+     */
+    @Test
+    @DisplayName("two fetches whose rails differ extract to the same bytes")
+    void furnitureChurnIsNotAChange() {
+        ArticleContent first = extractor.extract(fixture("nzz-rails-fetch1.html"));
+        ArticleContent second = extractor.extract(fixture("nzz-rails-fetch2.html"));
+
+        assertThat(fixture("nzz-rails-fetch1.html")).isNotEqualTo(fixture("nzz-rails-fetch2.html"));
+        assertThat(serialize(second)).isEqualTo(serialize(first));
+    }
+
+    /**
+     * The four blocks NZZ stored as article paragraphs before the {@code data-*}
+     * vocabulary existed. Their class attributes carry nothing but Tailwind
+     * utilities, so class and id alone can never reach them.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("sources")
+    @DisplayName("a Tailwind page's rails reach no revision")
+    void railsAreNeverProse(String source) {
+        ArticleContent content = extractor.extract(fixture(source + ".html"));
+
+        assertThat(content.paragraphs()).noneMatch(paragraph ->
+                paragraph.startsWith("Für Sie empfohlen")
+                        || paragraph.startsWith("Mehr zum Thema")
+                        || paragraph.startsWith("Artikel von NZZ Bellevue")
+                        || paragraph.equals("Solitär"));
+    }
+
+    /**
+     * sueddeutsche.de marks its standfirst {@code data-manual="teaserText"} where NZZ
+     * marks a rail {@code data-ct-type="teaser container title"}. The declared content
+     * root is what tells the two apart, and the standfirst is the sentence a silent
+     * edit is most likely to touch.
+     */
+    @Test
+    @DisplayName("data-* names furniture around the article, never inside a declared one")
+    void declaredNamesStopAtTheContentRoot() {
+        String html = """
+                <body>
+                  <div data-ct-type="teaser container title"><h2>Für Sie empfohlen</h2></div>
+                  <article>
+                    <p data-manual="teaserText">Der Konzern zahlt bis zu 16,68 Milliarden Dollar an die Bundesstaaten.</p>
+                    <p>Die Einigung bewahrt das Unternehmen vor einem Prozess, der im August begonnen hatte.</p>
+                  </article>
+                </body>
+                """;
+
+        assertThat(extractor.extract(html).paragraphs()).containsExactly(
+                "Der Konzern zahlt bis zu 16,68 Milliarden Dollar an die Bundesstaaten.",
+                "Die Einigung bewahrt das Unternehmen vor einem Prozess, der im August begonnen hatte.");
+    }
+
+    /**
+     * A heading left behind by a box pruning emptied is a caption, but a page that
+     * is mostly headings is a list whose headings are its content -- a liveblog
+     * whose entry bodies load later. Both shapes end on a heading; only the ratio
+     * separates them.
+     */
+    @Test
+    @DisplayName("a trailing heading goes only where prose outnumbers it")
+    void trailingHeadingsGoOnlyWhenProseOutweighsThem() {
+        String article = """
+                <article>
+                  <p>Der Rechnungshof nennt drei Projekte, deren Kosten sich seither verdoppelt haben.</p>
+                  <p>Das Ministerium widerspricht der Darstellung und verweist auf gestiegene Materialpreise.</p>
+                  <h2>Mehr zum Thema Netzausbau</h2>
+                </article>
+                """;
+        String liveblog = """
+                <article>
+                  <p>Für unseren Liveblog verwenden wir Material der Nachrichtenagenturen dpa und Reuters.</p>
+                  <h2>Kabinett vertagt den Netzausbau</h2>
+                  <h2>Länder fordern einen Ausgleich</h2>
+                </article>
+                """;
+
+        assertThat(extractor.extract(article).paragraphs()).hasSize(2);
+        assertThat(extractor.extract(liveblog).paragraphs()).hasSize(3);
     }
 
     private ArticleContent expected(String source) {
