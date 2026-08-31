@@ -1,0 +1,25 @@
+# Text pairs that must produce the same content hash: two spellings, one article.
+# Format: <text a> | <text b> | <what this row pins down>
+# '#' starts a comment line, blank lines are ignored. Invisible characters cannot be
+# spelled in this table and are covered by ContentHasherTest directly.
+
+Der Bericht liegt dem Ministerium vor. | Der   Bericht liegt dem  Ministerium vor. | a run of spaces is one space
+„Ohne Ausgleich gibt es keine Zustimmung“, sagte sie. | "Ohne Ausgleich gibt es keine Zustimmung", sagte sie. | German typographic quotes
+«Ohne Ausgleich gibt es keine Zustimmung», sagte sie. | "Ohne Ausgleich gibt es keine Zustimmung", sagte sie. | guillemets reach the same form as the row above
+It’s the government’s own plan. | It's the government's own plan. | curly apostrophe
+Der Ausbau – seit Jahren geplant – stockt. | Der Ausbau - seit Jahren geplant - stockt. | en dash
+Der Ausbau — seit Jahren geplant — stockt. | Der Ausbau - seit Jahren geplant - stockt. | em dash reaches the same form as the en dash row
+Die Frist läuft ab … oder wird verlängert. | Die Frist läuft ab ... oder wird verlängert. | ellipsis character
+Aktualisiert vor 3 Stunden im Livebericht. | Aktualisiert vor 45 Minuten im Livebericht. | German relative timestamp, digits
+Aktualisiert vor einer Stunde im Livebericht. | Aktualisiert vor wenigen Minuten im Livebericht. | German relative timestamp, spelled out
+Updated 3 hours ago in the live report. | Updated 12 minutes ago in the live report. | English relative timestamp
+The report was filed just now. | The report was filed moments ago. | vague English relative timestamp
+Der Bericht erschien soeben. | Der Bericht erschien vor kurzem. | vague German relative timestamp
+Mehr unter example-news.com/dossier?sessionId=A93F2B77C1D4E5F6 bereit. | Mehr unter example-news.com/dossier?sessionId=B71E0C4429A6F8D3 bereit. | session id as name=value
+Mehr unter example-news.com/a?utm_source=twitter heute. | Mehr unter example-news.com/a?utm_source=newsletter heute. | campaign parameter as name=value
+Der Platz adSlotId=div-gpt-ad-1712345678901-0 bleibt frei. | Der Platz adSlotId=div-gpt-ad-1798765432109-4 bleibt frei. | ad slot id, name and opaque value
+Die Kennung 7f3a9c21b48e5d06 endet im Herbst. | Die Kennung c04d15ae9b72f831 endet im Herbst. | bare hex token
+Der Vorgang 4a1f9c02-77b1-4e35-9a0e-1f2b3c4d5e6f laeuft weiter. | Der Vorgang b7c05d1e-2a34-4f88-91cc-70de6f5a4b32 laeuft weiter. | bare UUID
+Die Referenz AB12cd34EF56gh78 gilt weiter. | Die Referenz ZZ99yy88XX77ww66 gilt weiter. | bare token mixing letters and digits
+Der Vorgang 1712345678901 bleibt offen. | Der Vorgang 1798765432109 bleibt offen. | bare numeric token of id length
+Die Sitzung endete um 18 Uhr. | Die   Sitzung endete um 18 Uhr. | extra indentation inside a paragraph
