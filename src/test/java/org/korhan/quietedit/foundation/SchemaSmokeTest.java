@@ -64,8 +64,8 @@ class SchemaSmokeTest {
         document.setVersionCount(2);
         UUID documentId = documents.saveAndFlush(document).getId();
 
-        DocumentVersion first = newVersion(documentId, now, "a".repeat(64));
-        DocumentVersion second = newVersion(documentId, now, "b".repeat(64));
+        DocumentVersion first = newVersion(documentId, 1, now, "a".repeat(64));
+        DocumentVersion second = newVersion(documentId, 2, now, "b".repeat(64));
         second.setEncoding(new EncodingVerdict("UTF-8", CharsetSource.HTTP_HEADER, true));
         UUID firstId = versions.saveAndFlush(first).getId();
         UUID secondId = versions.saveAndFlush(second).getId();
@@ -96,6 +96,7 @@ class SchemaSmokeTest {
 
         DocumentVersion readVersion = versions.findById(secondId).orElseThrow();
         assertThat(readVersion.getDocumentId()).isEqualTo(documentId);
+        assertThat(readVersion.getVersionNumber()).isEqualTo(2);
         assertThat(readVersion.getParagraphs()).containsExactly("First paragraph.", "Second paragraph.");
         assertThat(readVersion.getContentHash()).isEqualTo("b".repeat(64));
         assertThat(readVersion.getSimhash()).isEqualTo(42L);
@@ -117,9 +118,11 @@ class SchemaSmokeTest {
         assertThat(readChange.getDiffPayload()).containsEntry("changedParagraphs", 1);
     }
 
-    private static DocumentVersion newVersion(UUID documentId, Instant fetchedAt, String contentHash) {
+    private static DocumentVersion newVersion(UUID documentId, int versionNumber, Instant fetchedAt,
+                                              String contentHash) {
         DocumentVersion version = new DocumentVersion(
                 documentId,
+                versionNumber,
                 fetchedAt,
                 List.of("First paragraph.", "Second paragraph."),
                 contentHash,

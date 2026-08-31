@@ -15,6 +15,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.korhan.quietedit.PostgresTestContainerConfig;
+import org.korhan.quietedit.support.TestDatabase;
 import org.korhan.quietedit.versioning.DocumentRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -42,6 +43,9 @@ class FeedIngestRunTest {
     }
 
     @Autowired
+    private TestDatabase database;
+
+    @Autowired
     private FeedFetchService feedFetchService;
 
     @Autowired
@@ -67,7 +71,7 @@ class FeedIngestRunTest {
     @BeforeEach
     void reset() {
         server.resetAll();
-        feeds.deleteAll();
+        database.reset();
     }
 
     @Test

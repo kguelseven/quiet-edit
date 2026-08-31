@@ -1,8 +1,10 @@
 package org.korhan.quietedit;
 
+import org.korhan.quietedit.support.TestDatabase;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
@@ -19,5 +21,10 @@ public class PostgresTestContainerConfig {
     @ServiceConnection
     PostgreSQLContainer postgresContainer() {
         return new PostgreSQLContainer(POSTGRES_IMAGE);
+    }
+
+    @Bean
+    TestDatabase testDatabase(JdbcTemplate jdbc) {
+        return new TestDatabase(jdbc);
     }
 }

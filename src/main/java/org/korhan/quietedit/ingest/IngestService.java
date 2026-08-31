@@ -2,7 +2,10 @@ package org.korhan.quietedit.ingest;
 
 import org.korhan.quietedit.versioning.DocumentRegistry;
 import org.korhan.quietedit.versioning.EncodingVerdict;
+import org.korhan.quietedit.versioning.Observation;
 import org.korhan.quietedit.versioning.UrlCanonicalizer;
+import org.korhan.quietedit.versioning.VersionOutcome;
+import org.korhan.quietedit.versioning.VersionStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -34,16 +37,15 @@ import java.util.stream.Collectors;
  * {@link #runOnce()} and neither holds a decision of its own, which is what makes a
  * full run testable without a scheduler and triggerable by hand in production.
  *
- * <p>Nothing is versioned here. A run records <em>that</em> an article was seen and
- * under which identity; whether its text moved since the last observation needs a
- * content hash and the version store, and those are separate tickets. The result
- * object's {@code NEW}/{@code UNCHANGED} split is therefore about identity, not
- * content -- see {@link ArticleIngestOutcome}.
+ * <p>Versioning is delegated, not decided here: every extracted article is handed
+ * to {@link VersionStore}, which owns the rule about when an observation becomes a
+ * revision. A run only reports the verdict it gets back, which is what keeps
+ * "has this text moved" a single answer with a single implementation.
  *
- * <p>What a run does carry out is the {@link EncodingVerdict} for every article it
- * decoded. It cannot act on it -- there is no version to attach it to yet -- but it
- * is the only stage that knows it, so dropping it here would mean reconstructing at
- * classification time a fact that was certain at fetch time.
+ * <p>The {@link EncodingVerdict} travels with the article all the way into that
+ * store. This is the only stage that knows how the bytes were decoded, so dropping
+ * it here would mean reconstructing at classification time a fact that was certain
+ * at fetch time.
  *
  * <p>Failure isolation is the load-bearing property. Every stage turns its expected
  * failures into results rather than exceptions, and each stage is additionally
@@ -92,6 +94,7 @@ public class IngestService {
     private final RawHtmlStore rawHtml;
     private final UrlCanonicalizer canonicalizer;
     private final DocumentRegistry documents;
+    private final VersionStore versions;
     private final ArticleAttemptLog attemptLog;
     private final Clock clock;
     private final ArticleBudget budget;
@@ -102,7 +105,8 @@ public class IngestService {
     public IngestService(FeedFetchService feedFetchService, FeedParser feedParser,
                          ArticleFetcher articleFetcher, ArticleExtractor articleExtractor,
                          RawHtmlStore rawHtml, UrlCanonicalizer canonicalizer,
-                         DocumentRegistry documents, ArticleAttemptLog attemptLog, Clock clock,
+                         DocumentRegistry documents, VersionStore versions,
+                         ArticleAttemptLog attemptLog, Clock clock,
                          IngestRunProperties properties) {
         this.feedFetchService = feedFetchService;
         this.feedParser = feedParser;
@@ -111,6 +115,7 @@ public class IngestService {
         this.rawHtml = rawHtml;
         this.canonicalizer = canonicalizer;
         this.documents = documents;
+        this.versions = versions;
         this.attemptLog = attemptLog;
         this.clock = clock;
         this.budget = new ArticleBudget(properties.maxArticles(), properties.maxArticleFailures());
@@ -147,12 +152,13 @@ public class IngestService {
         IngestRun run = new IngestRun(startedAt, clock.instant(), feedRun.catalog(),
                 work.stream().map(FeedWork::toResult).toList());
         log.info("Ingest run finished in {}: feeds {} fetched / {} unchanged / {} failed; "
-                        + "articles {} planned, {} new, {} unchanged, {} skipped, {} failed, "
+                        + "articles {} planned, {} new, {} changed, {} unchanged, {} skipped, {} failed, "
                         + "{} deferred, {} abandoned",
                 run.duration(),
                 run.feedCount(FeedFetchOutcome.FETCHED), run.feedCount(FeedFetchOutcome.NOT_MODIFIED),
                 run.feedCount(FeedFetchOutcome.FAILED),
-                run.checked(), run.count(ArticleIngestOutcome.NEW), run.count(ArticleIngestOutcome.UNCHANGED),
+                run.checked(), run.count(ArticleIngestOutcome.NEW), run.count(ArticleIngestOutcome.CHANGED),
+                run.count(ArticleIngestOutcome.UNCHANGED),
                 run.count(ArticleIngestOutcome.SKIPPED), run.count(ArticleIngestOutcome.FAILED),
                 run.count(ArticleIngestOutcome.DEFERRED), run.count(ArticleIngestOutcome.ABANDONED));
         long mojibake = run.articles().stream()
@@ -348,24 +354,54 @@ public class IngestService {
         return new Attempt(candidate, fetch, canonicalUrl, content, decoded.verdict(), null);
     }
 
-    /** The only stage that writes documents, and it runs single-threaded. */
+    /**
+     * The only stage that writes documents and versions, and it runs single-threaded.
+     *
+     * <p>Two transactions, not one: identity is established first, then the
+     * observation is offered to the version store. Splitting them means a version
+     * write that fails leaves the document registered and its {@code lastCheckedAt}
+     * updated, so the next run re-checks the article normally instead of the failure
+     * also erasing the record that anyone looked. The reverse -- a version without a
+     * document -- cannot happen, because the store needs the document id to write one.
+     */
     private ArticleIngestResult resolve(Attempt attempt) {
         if (attempt.decided() != null) {
             return attempt.decided();
         }
         Candidate candidate = attempt.candidate();
         ArticleFetchResult fetch = attempt.fetch();
+        DocumentRegistry.Registration registration;
         try {
-            DocumentRegistry.Registration registration =
-                    documents.register(attempt.canonicalUrl(), candidate.feedId(), fetch.fetchedAt());
-            return ArticleIngestResult.ingested(candidate.link(), fetch.finalUrl(), attempt.canonicalUrl(),
-                    registration.created(), registration.documentId(), fetch.rawHtmlRef(),
-                    attempt.content().paragraphs().size(), attempt.encoding());
+            registration = documents.register(attempt.canonicalUrl(), candidate.feedId(), fetch.fetchedAt());
         } catch (RuntimeException e) {
             log.error("Could not register {}", attempt.canonicalUrl(), e);
             return ArticleIngestResult.failed(candidate.link(), fetch.finalUrl(),
                     "not registered: " + e.getClass().getSimpleName());
         }
+        VersionStore.Stored stored;
+        try {
+            stored = versions.record(registration.documentId(), Observation.of(
+                    fetch.fetchedAt(), attempt.content(), statusOf(fetch), candidate.feedTitle(),
+                    fetch.rawHtmlRef(), attempt.encoding()));
+        } catch (RuntimeException e) {
+            log.error("Could not version {}", attempt.canonicalUrl(), e);
+            return ArticleIngestResult.failed(candidate.link(), fetch.finalUrl(),
+                    "not versioned: " + e.getClass().getSimpleName());
+        }
+        if (stored.outcome() == VersionOutcome.APPENDED && !registration.created()) {
+            log.info("{} changed: version {} appended", attempt.canonicalUrl(), stored.versionNumber());
+        }
+        return ArticleIngestResult.ingested(candidate.link(), fetch.finalUrl(), attempt.canonicalUrl(),
+                registration.created(), registration.documentId(), stored, fetch.rawHtmlRef(),
+                attempt.content().paragraphs().size(), attempt.encoding());
+    }
+
+    /**
+     * A fetched article always carries a status; the {@code Integer} on the fetch
+     * result is nullable only for the outcomes that never reached this far.
+     */
+    private static int statusOf(ArticleFetchResult fetch) {
+        return fetch.httpStatus() == null ? 0 : fetch.httpStatus();
     }
 
     /**
@@ -405,7 +441,8 @@ public class IngestService {
             for (int slot = 0; slot < parse.entries().size(); slot++) {
                 String link = parse.entries().get(slot).link().trim();
                 if (seenLinks.add(link)) {
-                    work.candidates.add(new Candidate(work, slot, fetch.feedId(), link, identity.apply(link)));
+                    work.candidates.add(new Candidate(work, slot, fetch.feedId(), link,
+                            identity.apply(link), parse.entries().get(slot).title()));
                 } else {
                     work.articles[slot] = ArticleIngestResult.skipped(link, null, "duplicate link in this run");
                 }
@@ -423,10 +460,14 @@ public class IngestService {
     }
 
     /**
-     * @param identity what the budget and the attempt log key this link by, resolved
-     *                 before the fetch because the ranking happens before the fetch
+     * @param identity  what the budget and the attempt log key this link by, resolved
+     *                  before the fetch because the ranking happens before the fetch
+     * @param feedTitle the headline as the feed advertised it, kept beside the one the
+     *                  page carries: a feed and a page that disagree about a headline
+     *                  is itself a signal, and only the version can record it
      */
-    private record Candidate(FeedWork work, int slot, UUID feedId, String link, String identity) {
+    private record Candidate(FeedWork work, int slot, UUID feedId, String link, String identity,
+                             String feedTitle) {
     }
 
     /**

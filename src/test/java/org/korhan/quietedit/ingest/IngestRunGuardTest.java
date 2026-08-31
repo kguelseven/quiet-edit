@@ -17,6 +17,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.korhan.quietedit.PostgresTestContainerConfig;
+import org.korhan.quietedit.support.TestDatabase;
 import org.korhan.quietedit.versioning.DocumentRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -67,6 +68,9 @@ class IngestRunGuardTest {
     }
 
     @Autowired
+    private TestDatabase database;
+
+    @Autowired
     private IngestService ingestService;
 
     @LocalServerPort
@@ -103,11 +107,10 @@ class IngestRunGuardTest {
     @BeforeEach
     void reset() {
         server.resetAll();
-        documents.deleteAll();
-        // Cleared with the documents: a leftover attempt row would rank this test's
-        // candidates by what the previous test tried, not by what this one did.
-        attempts.deleteAll();
-        feeds.deleteAll();
+        // The whole schema, not just the documents: a leftover attempt row would rank
+        // this test's candidates by what the previous test tried, not by what this one
+        // did, and versions cannot be deleted at all.
+        database.reset();
         server.stubFor(get("/robots.txt").willReturn(aResponse().withStatus(404)));
     }
 
