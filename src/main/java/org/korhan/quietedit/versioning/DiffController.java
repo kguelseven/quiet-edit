@@ -19,6 +19,8 @@ import java.util.UUID;
  * <ul>
  *   <li>{@code GET /api/documents/changed} -- the documents observed to change,
  *       newest change first. The entry point: there is no way to guess a document id.</li>
+ *   <li>{@code GET /api/documents/{id}/revisions} -- which revisions that document
+ *       has, so the two ordinals the diff takes can be chosen rather than guessed.</li>
  *   <li>{@code GET /api/documents/{id}/diff} -- one diff. With no parameters it is the
  *       newest pair, which is what "what changed" means for an article being watched.</li>
  * </ul>
@@ -59,6 +61,16 @@ public class DiffController {
     }
 
     /**
+     * The document's revisions, oldest first. Oldest first because it is the order the
+     * history happened in, and because the ordinals it prints then read as the
+     * {@code from}/{@code to} of the diff endpoint in the same direction.
+     */
+    @GetMapping("/{documentId}/revisions")
+    public RevisionsResponse revisions(@PathVariable UUID documentId) {
+        return RevisionsResponse.of(service.revisions(documentId));
+    }
+
+    /**
      * @param from version ordinal of the earlier revision; defaults to {@code to - 1}
      * @param to   version ordinal of the later revision; defaults to the newest
      */
@@ -93,6 +105,25 @@ public class DiffController {
         }
     }
 
+    /**
+     * What revisions a document has. Deliberately carries no paragraph text: the point
+     * is to pick a pair, and shipping every revision's full text would make the
+     * listing cost more than the diff it is meant to precede. {@code contentHash} and
+     * the paragraph count are what distinguish two revisions without reading them.
+     */
+    public record RevisionsResponse(
+            UUID documentId,
+            String canonicalUrl,
+            int count,
+            List<Revision> revisions) {
+
+        static RevisionsResponse of(DocumentRevisions revisions) {
+            List<Revision> rows = revisions.revisions().stream().map(Revision::of).toList();
+            return new RevisionsResponse(revisions.document().getId(),
+                    revisions.document().getCanonicalUrl(), rows.size(), rows);
+        }
+    }
+
     public record DiffResponse(
             UUID documentId,
             String canonicalUrl,
@@ -117,10 +148,15 @@ public class DiffController {
     }
 
     /**
-     * Which observation this side of the diff is. {@code contentHash} is included so a
-     * reader can tell two revisions apart without reading their text, and
-     * {@code encoding} as prose rather than three fields, matching the ingest
-     * endpoint: an edit that is really a re-decode is the first thing to rule out.
+     * One observation, named the same way on both endpoints: a side of a diff and a row
+     * of the revision listing are the same thing seen twice, and a client that has read
+     * the listing should not have to learn a second shape to read the diff.
+     *
+     * <p>{@code contentHash} is included so a reader can tell two revisions apart
+     * without reading their text, and {@code encoding} as prose rather than three
+     * fields, matching the ingest endpoint: an edit that is really a re-decode is the
+     * first thing to rule out, and in the listing it is visible before any diff is
+     * requested at all.
      */
     public record Revision(
             UUID versionId,
