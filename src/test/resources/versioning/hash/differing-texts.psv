@@ -1,0 +1,15 @@
+# Text pairs that must produce different content hashes: this is a real edit.
+# Format: <text a> | <text b> | <what this row pins down>
+# '#' starts a comment line, blank lines are ignored.
+
+Der Ausbau wurde erneut verschoben. | Der Ausbau wurde erneut vertagt. | one changed word
+Die Regierung stimmt dem Plan zu. | Die Regierung stimmt dem Plan nicht zu. | an inserted negation
+Der Plan umfasst 4.700 Kilometer. | Der Plan umfasst 4.800 Kilometer. | one changed digit in a figure
+Die Polizei bestätigte den Vorfall. | Die polizei bestätigte den Vorfall. | letter case
+Sie kommt zur Sitzung. | Sie kommt zur Sitzung? | sentence punctuation
+Die Länder fordern einen Ausgleich. | Einen Ausgleich fordern die Länder. | word order
+Vor drei Jahren begann der Streit. | Vor vier Jahren begann der Streit. | years are narrative prose, not a ticking widget
+Vor zwei Wochen lag der Entwurf vor. | Vor drei Wochen lag der Entwurf vor. | weeks are left alone for the same reason
+Die SARS-CoV-2-Variante breitet sich aus. | Die SARS-CoV-3-Variante breitet sich aus. | a hyphenated real word is not an opaque token
+Die Anzeige 4711 endet im Herbst. | Die Anzeige 4712 endet im Herbst. | a short number stays content
+Der Bericht liegt vor. | Der Bericht liegt vor. Er wird geprüft. | an appended sentence inside one paragraph
