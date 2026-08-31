@@ -96,6 +96,11 @@ class IngestRunGuardTest {
         registry.add("quietedit.ingest.article.storage-root", storageRoot::toString);
         registry.add("quietedit.ingest.article.robots-cache-ttl", () -> "0ms");
         registry.add("quietedit.ingest.article.robots-failure-cache-ttl", () -> "0ms");
+        // The re-check curve's floor, effectively removed. This test is about the
+        // budget's rotation: what it asserts is which candidates a run reaches, and
+        // runs a fraction of a second apart must all be allowed to reach theirs. What
+        // the curve decides is asserted in RecheckPolicyTest.
+        registry.add("quietedit.ingest.recheck.min-interval", () -> "1ms");
     }
 
     @AfterAll

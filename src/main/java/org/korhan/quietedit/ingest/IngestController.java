@@ -48,7 +48,11 @@ public class IngestController {
             CatalogSummary catalog,
             FeedSummary feedSummary,
             ArticleSummary articleSummary,
-            List<FeedItem> feeds) {
+            List<FeedItem> feeds,
+            /* Articles the re-check policy offered that no feed advertises any more.
+             * Kept beside the feeds rather than inside one, because they belong to
+             * no feed's answer -- see IngestRun. */
+            List<ArticleItem> rechecks) {
 
         static RunResponse of(IngestRun run) {
             return new RunResponse(
@@ -69,8 +73,10 @@ public class IngestController {
                             run.count(ArticleIngestOutcome.SKIPPED),
                             run.count(ArticleIngestOutcome.FAILED),
                             run.count(ArticleIngestOutcome.DEFERRED),
-                            run.count(ArticleIngestOutcome.ABANDONED)),
-                    run.feeds().stream().map(FeedItem::of).toList());
+                            run.count(ArticleIngestOutcome.ABANDONED),
+                            run.count(ArticleIngestOutcome.NOT_DUE)),
+                    run.feeds().stream().map(FeedItem::of).toList(),
+                    run.rechecks().stream().map(ArticleItem::of).toList());
         }
     }
 
@@ -82,12 +88,13 @@ public class IngestController {
 
     /**
      * {@code checked} is the sum of the outcome counts -- what the run planned for.
-     * {@code deferred} and {@code abandoned} are the parts of that plan the run's
-     * article budget did not fetch -- the first to be picked up next run, the second
-     * for good -- so {@code checked - deferred - abandoned} is what was fetched.
+     * {@code deferred}, {@code abandoned} and {@code notDue} are the parts of that plan
+     * the run did not fetch: the first to be picked up next run, the second for good,
+     * the third because it was not yet time. Subtracting all three from
+     * {@code checked} is what was fetched.
      */
     public record ArticleSummary(int checked, long created, long changed, long unchanged, long skipped,
-                                 long failed, long deferred, long abandoned) {
+                                 long failed, long deferred, long abandoned, long notDue) {
     }
 
     public record FeedItem(

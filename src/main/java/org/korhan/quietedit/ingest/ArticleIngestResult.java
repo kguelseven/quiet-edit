@@ -87,6 +87,24 @@ public record ArticleIngestResult(
                 "abandoned after " + failureCount + " consecutive failed attempts");
     }
 
+    /**
+     * Not fetched because the re-check policy said it was not time. No URL beyond the
+     * link, like every other outcome that never sent a request.
+     *
+     * <p>The decision is spelled out in the reason rather than left to the outcome:
+     * "looked at eight minutes ago" and "stable for a fortnight" both mean no request,
+     * but only one of them means this system has stopped watching the article.
+     */
+    static ArticleIngestResult notDue(String link, RecheckDecision decision) {
+        return new ArticleIngestResult(link, null, null, ArticleIngestOutcome.NOT_DUE,
+                null, null, 0, null, 0, null, switch (decision) {
+                    case WAITING -> "checked too recently to be due again";
+                    case RETIRED -> "retired: nothing observed to change within its observation window";
+                    case THROTTLED -> "deferred by the per-host hourly request ceiling";
+                    case DUE -> throw new IllegalArgumentException("a due candidate is fetched, not reported");
+                });
+    }
+
     static ArticleIngestResult failed(String link, String finalUrl, String reason) {
         return new ArticleIngestResult(link, finalUrl, null, ArticleIngestOutcome.FAILED,
                 null, null, 0, null, 0, null, reason);

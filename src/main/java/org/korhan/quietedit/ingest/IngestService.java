@@ -1,5 +1,6 @@
 package org.korhan.quietedit.ingest;
 
+import org.korhan.quietedit.versioning.DocumentObservation;
 import org.korhan.quietedit.versioning.DocumentRegistry;
 import org.korhan.quietedit.versioning.EncodingVerdict;
 import org.korhan.quietedit.versioning.Observation;
@@ -10,12 +11,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.net.URI;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -27,6 +31,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * The whole path from outside to inside, in one synchronous call: sync the feed
@@ -46,9 +51,24 @@ import java.util.stream.Collectors;
  * written, and against that version's own {@code fetchedAt}. Doing it earlier -- at
  * planning time, against the run's start -- would measure "is this date in the
  * future" against a clock reading that no row records, so a discarded date would be
- * replaced by a timestamp appearing nowhere in the history. Only the feed's
- * publication date is read; its {@code updated} date is deliberately not consulted,
- * because what changed is decided by comparing fetched text, never by a claim.
+ * replaced by a timestamp appearing nowhere in the history.
+ *
+ * <p>The feed's {@code updated} date reaches nothing that a version records. It is
+ * read at planning time and handed to {@link RecheckPolicy} alone, where it means
+ * "worth another look"; what actually changed is still decided by comparing fetched
+ * text against the newest stored revision, never by a publisher's claim. The two
+ * dates are therefore normalised at different moments against different reference
+ * times, which is correct: one is evidence about an article, the other is a hint
+ * about when to fetch it.
+ *
+ * <p>A run has two sources of candidates. Every feed's links are one; the documents
+ * {@link RecheckPolicy} still wants to watch are the other, and they are needed
+ * because a feed drops an article after a day or so while the edits worth catching go
+ * on for longer. Both sources meet the same two gates in the same order: the policy
+ * decides <em>whether it is time</em> for each candidate, and {@link ArticleBudget}
+ * then decides <em>how many</em> fit into this run and in which order. A stored
+ * document a feed still advertises is offered once, by the feed, so that the entry's
+ * dates and title are not thrown away.
  *
  * <p>The {@link EncodingVerdict} travels with the article all the way into that
  * store. This is the only stage that knows how the bytes were decoded, so dropping
@@ -106,6 +126,8 @@ public class IngestService {
     private final ArticleAttemptLog attemptLog;
     private final Clock clock;
     private final ArticleBudget budget;
+    private final RecheckPolicy recheck;
+    private final int maxRecheckCandidates;
 
     /** False between runs. The single permit that keeps two runs from overlapping. */
     private final AtomicBoolean running = new AtomicBoolean();
@@ -115,7 +137,7 @@ public class IngestService {
                          RawHtmlStore rawHtml, UrlCanonicalizer canonicalizer,
                          DocumentRegistry documents, VersionStore versions,
                          ArticleAttemptLog attemptLog, Clock clock,
-                         IngestRunProperties properties) {
+                         IngestRunProperties properties, RecheckProperties recheckProperties) {
         this.feedFetchService = feedFetchService;
         this.feedParser = feedParser;
         this.articleFetcher = articleFetcher;
@@ -127,6 +149,8 @@ public class IngestService {
         this.attemptLog = attemptLog;
         this.clock = clock;
         this.budget = new ArticleBudget(properties.maxArticles(), properties.maxArticleFailures());
+        this.recheck = recheckProperties.toPolicy();
+        this.maxRecheckCandidates = recheckProperties.maxCandidatesPerRun();
     }
 
     /**
@@ -149,25 +173,34 @@ public class IngestService {
 
         Set<String> seenLinks = new LinkedHashSet<>();
         List<FeedWork> work = feedRun.results().stream().map(fetch -> plan(fetch, seenLinks)).toList();
-        List<Candidate> candidates = work.stream().flatMap(feed -> feed.candidates.stream()).toList();
-        for (Attempt attempt : fetchAll(admit(candidates))) {
+        List<Candidate> feedCandidates = work.stream().flatMap(feed -> feed.candidates.stream()).toList();
+
+        Map<String, DocumentObservation> known = new HashMap<>(documents.observationsOf(
+                feedCandidates.stream().map(Candidate::identity).collect(Collectors.toSet())));
+        RecheckWork rechecks = offerStoredDocuments(startedAt, known);
+
+        List<Candidate> candidates = Stream.concat(feedCandidates.stream(), rechecks.candidates.stream()).toList();
+        for (Attempt attempt : fetchAll(admit(due(startedAt, candidates, known)))) {
             Candidate candidate = attempt.candidate();
             ArticleIngestResult result = resolve(attempt);
-            candidate.work().articles[candidate.slot()] = result;
+            candidate.sink().accept(candidate.slot(), result);
             recordAttempt(candidate, result);
         }
 
         IngestRun run = new IngestRun(startedAt, clock.instant(), feedRun.catalog(),
-                work.stream().map(FeedWork::toResult).toList());
+                work.stream().map(FeedWork::toResult).toList(), rechecks.results());
         log.info("Ingest run finished in {}: feeds {} fetched / {} unchanged / {} failed; "
-                        + "articles {} planned, {} new, {} changed, {} unchanged, {} skipped, {} failed, "
-                        + "{} deferred, {} abandoned",
+                        + "articles {} planned ({} re-check candidates the feeds no longer carry), "
+                        + "{} new, {} changed, {} unchanged, {} skipped, {} failed, "
+                        + "{} not due, {} deferred, {} abandoned",
                 run.duration(),
                 run.feedCount(FeedFetchOutcome.FETCHED), run.feedCount(FeedFetchOutcome.NOT_MODIFIED),
                 run.feedCount(FeedFetchOutcome.FAILED),
-                run.checked(), run.count(ArticleIngestOutcome.NEW), run.count(ArticleIngestOutcome.CHANGED),
+                run.checked(), rechecks.candidates.size(),
+                run.count(ArticleIngestOutcome.NEW), run.count(ArticleIngestOutcome.CHANGED),
                 run.count(ArticleIngestOutcome.UNCHANGED),
                 run.count(ArticleIngestOutcome.SKIPPED), run.count(ArticleIngestOutcome.FAILED),
+                run.count(ArticleIngestOutcome.NOT_DUE),
                 run.count(ArticleIngestOutcome.DEFERRED), run.count(ArticleIngestOutcome.ABANDONED));
         long mojibake = run.articles().stream()
                 .filter(article -> article.encoding() != null && article.encoding().replaced())
@@ -177,6 +210,118 @@ public class IngestService {
                     mojibake);
         }
         return run;
+    }
+
+    /**
+     * Offers the documents the re-check policy could still want, minus the ones a feed
+     * is offering anyway, and records their state in {@code known} so that the policy
+     * sees one entry per candidate.
+     *
+     * <p>This is the half of the policy a feed cannot provide. A publisher's feed
+     * carries roughly a day of articles, and the observation window is measured in
+     * days, so without reading the store back the curve would simply stop being
+     * applied at the point where a feed drops an entry -- which is well before the
+     * point where this system stops caring about it.
+     *
+     * <p>The store is queried with the widest bounds any candidate could pass and the
+     * per-document decision is left to the policy: a query that tried to encode the
+     * curve would be a second implementation of it, in SQL, against the same numbers.
+     */
+    private RecheckWork offerStoredDocuments(Instant now, Map<String, DocumentObservation> known) {
+        RecheckWork work = new RecheckWork();
+        List<DocumentObservation> stored = documents.observationsPossiblyDue(
+                now.minus(recheck.minInterval()), now.minus(recheck.observationWindow()),
+                now.minus(recheck.widestWindow()), maxRecheckCandidates);
+        if (stored.size() == maxRecheckCandidates) {
+            log.warn("Re-check backlog reached the per-run ceiling of {}; the rest waits for the next run",
+                    maxRecheckCandidates);
+        }
+        for (DocumentObservation observation : stored) {
+            // A document a feed still advertises is already a candidate, and that
+            // candidate is the better one: it carries the entry's dates and title.
+            if (known.putIfAbsent(observation.canonicalUrl(), observation) == null) {
+                work.offer(observation);
+            }
+        }
+        return work;
+    }
+
+    /**
+     * Applies the re-check policy, deciding every candidate whose turn it is not.
+     *
+     * <p>Runs before {@link #admit}, and the order matters: the policy answers
+     * "should anyone fetch this now", the budget answers "can this run afford to". A
+     * budget applied first would spend its ceiling ranking candidates that were not
+     * due, and would report them as deferred -- which claims the next run will reach
+     * them, when what is true is that nothing needs to.
+     */
+    private List<Candidate> due(Instant now, List<Candidate> candidates,
+                                Map<String, DocumentObservation> known) {
+        if (candidates.isEmpty()) {
+            return candidates;
+        }
+        RecheckPolicy.Plan plan = recheck.plan(now,
+                candidates.stream().map(candidate -> stateOf(now, candidate, known)).toList());
+
+        List<Candidate> due = new ArrayList<>(plan.due().size());
+        for (int position = 0; position < candidates.size(); position++) {
+            Candidate candidate = candidates.get(position);
+            RecheckDecision decision = plan.at(position);
+            if (decision == RecheckDecision.DUE) {
+                due.add(candidate);
+            } else {
+                candidate.sink().accept(candidate.slot(),
+                        ArticleIngestResult.notDue(candidate.link(), decision));
+            }
+        }
+        if (plan.count(RecheckDecision.THROTTLED) > 0) {
+            log.warn("{} candidates were held back by the per-host ceiling of {} requests an hour",
+                    plan.count(RecheckDecision.THROTTLED), recheck.maxRequestsPerHostPerHour());
+        }
+        log.debug("Re-check policy: {} of {} candidates due, {} waiting, {} retired, {} throttled",
+                due.size(), candidates.size(), plan.count(RecheckDecision.WAITING),
+                plan.count(RecheckDecision.RETIRED), plan.count(RecheckDecision.THROTTLED));
+        return due;
+    }
+
+    /**
+     * One candidate's state, as the policy is allowed to see it.
+     *
+     * <p>The feed's {@code updated} date is normalised here and handed over whole,
+     * exactness flag included. Whether an inexact claim is worth acting on is the
+     * policy's decision, and it is spelled out there; normalising against the run's
+     * start is this method's, because the question is asked before anything is fetched
+     * and there is no later timestamp to measure against yet.
+     */
+    private RecheckState stateOf(Instant now, Candidate candidate, Map<String, DocumentObservation> known) {
+        String host = hostOf(candidate.identity());
+        DocumentObservation observation = known.get(candidate.identity());
+        if (observation == null) {
+            return RecheckState.unseen(host);
+        }
+        return new RecheckState(host, observation.firstSeenAt(), observation.lastCheckedAt(),
+                observation.lastChangedAt(), observation.versionCount(),
+                DateNormalizer.normalize(candidate.updatedRaw(), now));
+    }
+
+    /**
+     * The bucket a candidate's requests are counted in.
+     *
+     * <p>A URL with no readable host becomes its own bucket rather than being dropped
+     * or lumped in with the others. It gets a whole host's ceiling to itself, which
+     * costs nothing: {@link ArticleFetcher} refuses a URL without a host anyway, so the
+     * one request the bucket permits is the one that reports it broken.
+     */
+    private static String hostOf(String url) {
+        try {
+            String host = URI.create(url).getHost();
+            if (host != null && !host.isBlank()) {
+                return host.toLowerCase(Locale.ROOT);
+            }
+        } catch (RuntimeException e) {
+            log.debug("No host in {}; counted as a bucket of its own", url);
+        }
+        return url;
     }
 
     /**
@@ -203,10 +348,10 @@ public class IngestService {
             if (selection.admitted().contains(position)) {
                 selected.add(candidate);
             } else if (selection.abandoned().contains(position)) {
-                candidate.work().articles[candidate.slot()] = ArticleIngestResult.abandoned(
-                        candidate.link(), history.get(candidate.identity()).failureCount());
+                candidate.sink().accept(candidate.slot(), ArticleIngestResult.abandoned(
+                        candidate.link(), history.get(candidate.identity()).failureCount()));
             } else {
-                candidate.work().articles[candidate.slot()] = ArticleIngestResult.deferred(candidate.link());
+                candidate.sink().accept(candidate.slot(), ArticleIngestResult.deferred(candidate.link()));
             }
         }
         if (!selection.abandoned().isEmpty()) {
@@ -417,10 +562,22 @@ public class IngestService {
     }
 
     /**
+     * Where a candidate's result goes. Two things produce candidates -- a feed's
+     * entries and the store's due documents -- and both need their results back in
+     * their own order, so a candidate carries its sink rather than the run branching
+     * on where it came from.
+     *
+     * <p>Written from the calling thread only. The fan-out stage touches no result.
+     */
+    private interface ResultSink {
+        void accept(int slot, ArticleIngestResult result);
+    }
+
+    /**
      * One feed's slot table. Every parsed entry keeps its position, so a run's report
      * lists articles in feed order however the concurrent fetches happened to finish.
      */
-    private static final class FeedWork {
+    private static final class FeedWork implements ResultSink {
 
         private final FeedFetchResult fetch;
         private final FeedParseResult parse;
@@ -439,6 +596,11 @@ public class IngestService {
             return new FeedWork(fetch, null, failureReason, 0);
         }
 
+        @Override
+        public void accept(int slot, ArticleIngestResult result) {
+            articles[slot] = result;
+        }
+
         /**
          * A link advertised twice -- by two feeds of one publisher, or twice within
          * one feed -- is fetched once; {@code seenLinks} is therefore the whole
@@ -455,7 +617,7 @@ public class IngestService {
                 if (seenLinks.add(link)) {
                     FeedEntry entry = parse.entries().get(slot);
                     work.candidates.add(new Candidate(work, slot, fetch.feedId(), link,
-                            identity.apply(link), entry.title(), entry.publishedRaw()));
+                            identity.apply(link), entry.title(), entry.publishedRaw(), entry.updatedRaw()));
                 } else {
                     work.articles[slot] = ArticleIngestResult.skipped(link, null, "duplicate link in this run");
                 }
@@ -473,8 +635,46 @@ public class IngestService {
     }
 
     /**
-     * @param identity     what the budget and the attempt log key this link by, resolved
-     *                     before the fetch because the ranking happens before the fetch
+     * The documents the re-check policy wants looked at that no feed advertises any
+     * more. Its own slot table for the same reason a feed has one: a result belongs at
+     * the position its candidate had, whatever order the fetches finished in.
+     *
+     * <p>These candidates carry no title and no dates, because no feed said anything
+     * about them this run. That is not a loss of information: a feed that has dropped
+     * an entry has no current claim about it, and inventing one from the entry it used
+     * to carry would put a stale claim on a fresh version row.
+     */
+    private static final class RecheckWork implements ResultSink {
+
+        private final List<Candidate> candidates = new ArrayList<>();
+        private final List<ArticleIngestResult> articles = new ArrayList<>();
+
+        /**
+         * The document's canonical URL serves as link and identity at once. It is what
+         * the store is keyed by and what the attempt log will key by, and unlike a feed
+         * link it needs no provisional resolution -- it is already the real identity.
+         */
+        void offer(DocumentObservation observation) {
+            articles.add(null);
+            candidates.add(new Candidate(this, articles.size() - 1, observation.feedId(),
+                    observation.canonicalUrl(), observation.canonicalUrl(), null, null, null));
+        }
+
+        @Override
+        public void accept(int slot, ArticleIngestResult result) {
+            articles.set(slot, result);
+        }
+
+        List<ArticleIngestResult> results() {
+            return articles.stream().filter(Objects::nonNull).toList();
+        }
+    }
+
+    /**
+     * @param sink         where this candidate's result belongs, and at which slot
+     * @param identity     what the budget, the attempt log and the re-check policy key
+     *                     this link by, resolved before the fetch because all three
+     *                     decide before the fetch
      * @param feedTitle    the headline as the feed advertised it, kept beside the one the
      *                     page carries: a feed and a page that disagree about a headline
      *                     is itself a signal, and only the version can record it
@@ -482,9 +682,13 @@ public class IngestService {
      *                     It is normalised in {@link #resolve}, not here, so that the
      *                     retrieval time it is measured against is the very timestamp the
      *                     version is written with rather than a slightly earlier one
+     * @param updatedRaw   the feed's {@code updated} date, verbatim. Normalised in
+     *                     {@link #stateOf} against the run's start, because it is read
+     *                     to decide whether to fetch at all and so has to be answered
+     *                     before anything is fetched. It reaches no version row.
      */
-    private record Candidate(FeedWork work, int slot, UUID feedId, String link, String identity,
-                             String feedTitle, String publishedRaw) {
+    private record Candidate(ResultSink sink, int slot, UUID feedId, String link, String identity,
+                             String feedTitle, String publishedRaw, String updatedRaw) {
     }
 
     /**
