@@ -1,0 +1,9 @@
+# A watson.ch-style liveticker as first observed. Line 1 after the comments is the
+# title, every further non-blank line is one paragraph, in reading order.
+# Paragraph 1 is the page's own index line: the newest entry headlines joined with ++.
+Liveticker zur Sturzflut in Nepal
+Nepal: Zahl der Vermissten steigt auf über 1300 ++ Keine Informationen zu Schweizer Opfern
+Keine Informationen zu Schweizer Opfern
+Das EDA hat bislang keine Kenntnis von betroffenen Schweizer Staatsangehörigen.
+Nepal: Zahl der Vermissten steigt auf über 1300
+Die Behörden in Kathmandu melden über 1300 Vermisste.

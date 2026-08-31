@@ -226,10 +226,12 @@ public class ContentHasher {
      * {@code sessionId=A93F2B77C1D4E5F6} collapses to one marker instead of a
      * name followed by one.
      *
-     * <p>Package-private: the diff engine will need the same folding, and tests
-     * read better against it than against a digest.
+     * <p>Public: the diff engine folds paragraphs and words with it, and the
+     * analysis package folds the entries of a ticker's index line, so that all
+     * three agree on when two pieces of text are the same. Tests also read better
+     * against it than against a digest.
      */
-    String normalize(String text) {
+    public String normalize(String text) {
         if (text == null || text.isEmpty()) {
             return "";
         }
