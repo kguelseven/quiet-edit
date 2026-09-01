@@ -1,4 +1,4 @@
-# quietedit
+<img src="quietedit.svg" alt="" height="128">
 
 Detects silent edits to news articles: ingest RSS/Atom feeds, fetch the full
 text, version every revision, and diff what changed.
