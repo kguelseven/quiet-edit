@@ -18,38 +18,23 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * One observed revision of a document. Immutable and append-only once written:
- * a later observation never updates a version, it adds one.
+ * One observed revision of a document, written once and only ever read back.
  *
- * <p>That is not a convention this class is trusted to keep. Since Flyway V4 the
- * table rejects every {@code UPDATE} and {@code DELETE} outright, because a version
- * is the evidence for the claim "the article used to read like this" and evidence
- * that can be edited afterwards proves nothing. The entity is therefore written once
- * and only ever read back; it has no setters for the fields that carry the
- * observation, and the few it does have exist for values decided at write time.
+ * <p>Since Flyway V4 the table rejects every {@code UPDATE} and {@code DELETE}
+ * outright: a version is the evidence for "the article used to read like this", and
+ * evidence that can be edited afterwards proves nothing.
  *
- * <p>The paragraph list is stored as jsonb rather than a child table because a
- * version is only ever read and written whole; a join table would buy queryable
- * paragraphs that nothing needs and cost an ordering column plus N inserts per
- * observation.
+ * <p>The paragraph list is jsonb rather than a child table because a version is only
+ * ever read and written whole.
  *
- * <p>{@code contentHash} is {@code char(64)} — a hex-encoded SHA-256 — and is
- * deliberately not unique per document: an article that returns to a wording it
- * already published changed twice, and both moves are part of its history. "Unchanged
- * content produces no new version" is a comparison against the newest revision and
- * lives in {@link VersionStore}; see Flyway V5. {@code simhash} is the near-duplicate
- * counterpart and stays nullable: it is only meaningful once a fingerprinting strategy
- * exists.
+ * <p>{@code contentHash} is deliberately not unique per document -- an article that
+ * returns to a wording it already published changed twice, and both moves are part of
+ * its history (Flyway V5); the "unchanged content produces no new version" rule is a
+ * comparison against the newest revision and lives in {@link VersionStore}.
  *
- * <p>{@code rawHtmlRef} holds a path or storage key, never the HTML. Keeping
- * megabytes of markup out of the row keeps the version table scannable.
- *
- * <p>The {@link EncodingVerdict} is stored as three plain columns rather than as an
- * embeddable, because a record cannot be one, and it is optional: it is null on a
- * version written before the verdict was carried this far. {@code encodingReplaced}
- * is not nullable and defaults to false, which reads such a row as "text was clean" --
- * the only safe reading, since the alternative would mark every historical version as
- * suspect mojibake.
+ * <p>{@code encodingReplaced} is not nullable and defaults to false, so a version
+ * written before the verdict was carried this far reads as "text was clean" -- the only
+ * safe reading, since the alternative marks every historical version as suspect.
  */
 @Entity
 @Table(
@@ -67,10 +52,9 @@ public class DocumentVersion {
     private UUID documentId;
 
     /**
-     * Position in this document's history, 1 for the first observation. Unique per
-     * document in the schema, which is what makes two writers appending the same
-     * "next" revision a failed insert rather than a version count that quietly
-     * stops matching the history.
+     * Unique per document in the schema, which is what makes two writers appending the
+     * same "next" revision a failed insert rather than a version count that quietly stops
+     * matching the history.
      */
     @Column(name = "version_number", nullable = false)
     private int versionNumber;
@@ -91,7 +75,6 @@ public class DocumentVersion {
     @Column(name = "page_title")
     private String pageTitle;
 
-    /** Ordered list of paragraph texts. */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "paragraphs", nullable = false)
     private List<String> paragraphs;
@@ -118,9 +101,8 @@ public class DocumentVersion {
     private CharsetSource charsetSource;
 
     /**
-     * True when this version's text contains U+FFFD because the bytes contradicted
-     * the charset that was chosen. The one field that lets a later observation be read
-     * as an encoding repair rather than as a rewrite.
+     * True when the bytes contradicted the chosen charset. The one field that lets a later
+     * observation be read as an encoding repair rather than as a rewrite.
      */
     @Column(name = "encoding_replaced", nullable = false)
     private boolean encodingReplaced;

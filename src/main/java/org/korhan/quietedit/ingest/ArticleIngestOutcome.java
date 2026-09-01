@@ -1,41 +1,25 @@
 package org.korhan.quietedit.ingest;
 
 /**
- * How one article link ended in a run. Exactly one outcome per link the run
- * planned for, so the counts add up to the number of links it planned for.
+ * Exactly one outcome per link a run planned for, so the counts add up.
  *
- * <p>{@link #NEW}, {@link #CHANGED} and {@link #UNCHANGED} are statements about
- * content, not merely about identity: each one is the version store's verdict on
- * the article's text, reached by comparing its content hash against the newest
- * stored revision.
+ * <p>{@link #NEW}, {@link #CHANGED} and {@link #UNCHANGED} are statements about content:
+ * each is the version store's verdict on the text, not merely about identity.
  */
 public enum ArticleIngestOutcome {
 
-    /**
-     * Fetched, prose extracted, and the canonical URL had never been seen before.
-     * Its first revision was stored.
-     */
     NEW,
 
-    /**
-     * A known document whose text differs from the last revision stored for it: a
-     * new revision was appended. This is the outcome the whole system exists to
-     * produce.
-     */
+    /** The outcome the whole system exists to produce. */
     CHANGED,
 
-    /**
-     * A known document whose text is the one already on record. Nothing was
-     * written, which is the normal result of a re-check and by far the most common
-     * outcome of a run.
-     */
+    /** The normal result of a re-check, and by far the most common outcome of a run. */
     UNCHANGED,
 
     /**
-     * Nothing to version, and nothing wrong either: robots.txt said no, the
-     * response was a binary, or the page yielded no prose (a paywall stub, a
-     * JavaScript shell). Kept apart from {@link #FAILED} so that a report does not
-     * read as broken when the correct answer was "don't".
+     * Nothing to version and nothing wrong either: robots.txt said no, the response was a
+     * binary, or the page yielded no prose. Kept apart from {@link #FAILED} so that a
+     * report does not read as broken when the correct answer was "don't".
      */
     SKIPPED,
 
@@ -43,29 +27,24 @@ public enum ArticleIngestOutcome {
     FAILED,
 
     /**
-     * Never fetched: the run had reached its article ceiling. Not a failure and not
-     * a refusal -- the link keeps its place in {@link ArticleBudget}'s order and is
-     * the first thing the next run reaches for.
+     * The run had reached its article ceiling. Not a failure and not a refusal -- the link
+     * keeps its place in {@link ArticleBudget}'s order.
      */
     DEFERRED,
 
     /**
-     * Never fetched, and never will be: the link failed to produce a document too
-     * many runs in a row. Reported rather than dropped silently, because a feed that
-     * starts abandoning links is a fact about the publisher an operator wants to see.
+     * Never fetched, and never will be. Reported rather than dropped silently, because a
+     * feed that starts abandoning links is a fact an operator wants to see.
      */
     ABANDONED,
 
     /**
-     * Never fetched, because it was not time: {@link RecheckPolicy} says the document
-     * was looked at too recently, has been stable for long enough to be retired, or
-     * that its host has had its hour's worth of requests. Which of the three is in the
-     * result's reason.
+     * {@link RecheckPolicy} says the document was looked at too recently, has been stable
+     * long enough to be retired, or that its host has had its hour's requests; which of the
+     * three is in the result's reason.
      *
-     * <p>By far the most common outcome once a catalogue is warm, and the reason the
-     * others stay affordable: a feed re-advertises the same thirty links every poll,
-     * and fetching all of them every time is how a re-check budget gets spent on
-     * articles nobody is editing.
+     * <p>By far the most common outcome once a catalogue is warm, and the reason the others
+     * stay affordable: a feed re-advertises the same thirty links every poll.
      */
     NOT_DUE
 }

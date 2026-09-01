@@ -96,10 +96,7 @@ class IngestRunGuardTest {
         registry.add("quietedit.ingest.article.storage-root", storageRoot::toString);
         registry.add("quietedit.ingest.article.robots-cache-ttl", () -> "0ms");
         registry.add("quietedit.ingest.article.robots-failure-cache-ttl", () -> "0ms");
-        // The re-check curve's floor, effectively removed. This test is about the
-        // budget's rotation: what it asserts is which candidates a run reaches, and
-        // runs a fraction of a second apart must all be allowed to reach theirs. What
-        // the curve decides is asserted in RecheckPolicyTest.
+        // The curve's floor, removed: runs a fraction of a second apart must all reach their candidates.
         registry.add("quietedit.ingest.recheck.min-interval", () -> "1ms");
     }
 
@@ -112,9 +109,7 @@ class IngestRunGuardTest {
     @BeforeEach
     void reset() {
         server.resetAll();
-        // The whole schema, not just the documents: a leftover attempt row would rank
-        // this test's candidates by what the previous test tried, not by what this one
-        // did, and versions cannot be deleted at all.
+        // The whole schema: a leftover attempt row would rank by the previous test's tries.
         database.reset();
         server.stubFor(get("/robots.txt").willReturn(aResponse().withStatus(404)));
     }
@@ -138,8 +133,7 @@ class IngestRunGuardTest {
 
         IngestRun second = ingestService.runOnce();
 
-        // The leftovers were not lost: never-fetched candidates outrank the two the
-        // first run already has, so the second run continues where the first stopped.
+        // Never-fetched candidates outrank the first run's two, so the second continues from there.
         assertThat(second.count(ArticleIngestOutcome.NEW)).isEqualTo(2);
         assertThat(second.count(ArticleIngestOutcome.UNCHANGED)).isZero();
         assertThat(deferredLinks(second)).containsExactly(url("/eins"), url("/zwei"));

@@ -6,23 +6,16 @@ import java.util.Locale;
 
 /**
  * Decides whether a response is an HTML article or something we have no business
- * versioning -- a PDF, an image, a feed, a download.
+ * versioning.
  *
- * <p>Two independent checks, because either one alone is wrong on real sites:
- * <ul>
- *   <li>The declared {@code Content-Type}, which is what lets a PDF be skipped
- *       before its body is downloaded at all.</li>
- *   <li>The first bytes of the body, for the two cases the header cannot settle:
- *       a server that declares nothing (or {@code application/octet-stream}), and a
- *       server that declares {@code text/html} while serving a PDF -- common enough
- *       on document archives that trusting the header would file binaries as
- *       articles.</li>
- * </ul>
+ * <p>Two independent checks, because either alone is wrong on real sites: the declared
+ * {@code Content-Type}, which is what lets a PDF be skipped before its body is
+ * downloaded, and the first bytes, for the server that declares nothing and the one that
+ * declares {@code text/html} while serving a PDF.
  *
- * <p>Sniffing only ever rejects; it never promotes a non-HTML content type to HTML.
- * A recognised binary signature is proof of "not an article", while the absence of
- * one proves nothing, so an undeclared body without a known signature is accepted
- * and left to the parser.
+ * <p>Sniffing only ever rejects. A recognised binary signature proves "not an article",
+ * while the absence of one proves nothing, so an undeclared body without a known
+ * signature is accepted and left to the parser.
  */
 final class HtmlDetection {
 
@@ -93,8 +86,8 @@ final class HtmlDetection {
     }
 
     /**
-     * {@code offset} exists for the one signature that is not at the start of the
-     * file: an ISO media file begins with a four-byte length, then {@code ftyp}.
+     * {@code offset} exists for the one signature that is not at the start of the file: an
+     * ISO media file begins with a four-byte length, then {@code ftyp}.
      */
     private record Signature(String name, byte[] magic, int offset) {
 

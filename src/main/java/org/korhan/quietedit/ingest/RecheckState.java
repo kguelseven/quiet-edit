@@ -3,48 +3,28 @@ package org.korhan.quietedit.ingest;
 import java.time.Instant;
 
 /**
- * Everything {@link RecheckPolicy} is allowed to know about one candidate: which
- * host it sits on, what this system has already observed about it, and whether its
- * feed currently claims it was edited.
+ * Everything {@link RecheckPolicy} is allowed to know about one candidate.
  *
- * <p>Deliberately not the {@code Document} entity and deliberately not the
- * {@code DocumentObservation} it is built from. The policy is the one piece of this
- * feature that has to be a pure function -- state in, decision out -- and a policy
- * that took a JPA entity would be testable only with a database, while one that took
- * the versioning package's read model would grow a dependency on a table it never
- * touches. The cost is one mapping step in the ingest service; the benefit is that
- * every acceptance property of the policy is a plain assertion over records.
+ * <p>Deliberately neither the {@code Document} entity nor the
+ * {@code DocumentObservation} it is built from: the policy has to be a pure function, and
+ * an entity would make it testable only with a database while the versioning read model
+ * would grow it a dependency on a table it never touches.
  *
- * <p>{@code host} is what the per-host ceiling is counted by. It is a bucket key,
- * not a URL: the policy never parses it and never requests it.
+ * <p>{@code host} is a bucket key for the per-host ceiling, not a URL: the policy never
+ * parses it and never requests it.
  *
- * @param firstSeenAt    when this system first resolved the candidate to a document,
- *                       null exactly when it has never been seen. This is the age
- *                       reference rather than the publisher's date, and the reason is
- *                       in {@link RecheckPolicy}.
- * @param lastCheckedAt  when the document was last requested, null exactly when
- *                       {@code firstSeenAt} is
- * @param lastChangedAt  when a revision was last appended, null while the document
- *                       has only ever been observed saying one thing
- * @param versionCount   revisions on record; zero exactly when the candidate is
- *                       unseen. {@code versionCount - 1} is the number of observed
- *                       edits, because the first revision is the article itself.
- * @param feedUpdated    the {@code updated} date a feed currently claims for this
- *                       entry, normalised, or {@link NormalisedDate#ABSENT} when no
- *                       feed advertises the entry or the feed omits the field. Handed
- *                       over normalised rather than as an instant so that the policy
- *                       can see whether the publisher's date was exact -- deciding
- *                       what an inexact claim is worth is the policy's call, not the
- *                       caller's.
- * @param unconfirmedUpdatedClaims  how many fetches this candidate's <em>feed</em>
- *                       has run up under a standing {@code updated} claim without a
- *                       revision coming of it, cleared by the first one that does.
- *                       A property of the publisher rather than of this candidate,
- *                       and it is here for the same reason {@code feedUpdated} is:
- *                       what a claim is worth is the policy's call, and it cannot
- *                       make that call without knowing what the last few thousand
- *                       claims from the same source were worth. Maintained by
- *                       {@link UpdatedClaimLog}.
+ * @param firstSeenAt    null exactly when the candidate has never been seen; the age
+ *                       reference rather than the publisher's date
+ * @param lastCheckedAt  null exactly when {@code firstSeenAt} is
+ * @param lastChangedAt  null while the document has only ever said one thing
+ * @param versionCount   zero exactly when the candidate is unseen
+ * @param feedUpdated    normalised rather than an instant, so the policy can see whether
+ *                       the publisher's date was exact -- what an inexact claim is worth
+ *                       is its call, not the caller's
+ * @param unconfirmedUpdatedClaims  a property of the publisher rather than of this
+ *                       candidate, and here for the same reason: the policy cannot judge
+ *                       a claim without knowing what the last few were worth. Maintained
+ *                       by {@link UpdatedClaimLog}
  */
 public record RecheckState(
         String host,
@@ -75,9 +55,8 @@ public record RecheckState(
     }
 
     /**
-     * A candidate no document exists for yet. There is no re-check decision to make
-     * about it -- a first observation is not a re-check -- but it is still a request
-     * to a host, so it takes part in the ceiling.
+     * There is no re-check decision to make about a candidate no document exists for yet,
+     * but it is still a request to a host, so it takes part in the ceiling.
      */
     public static RecheckState unseen(String host) {
         return new RecheckState(host, null, null, null, 0, NormalisedDate.ABSENT, 0);
@@ -88,10 +67,9 @@ public record RecheckState(
     }
 
     /**
-     * The last thing that happened to this document: its most recent observed edit,
-     * or its discovery while it has never been seen to move. Both the interval and
-     * the observation window are measured from here, which is what makes an edit
-     * restart the clock.
+     * The most recent observed edit, or the discovery while nothing has moved. Both the
+     * interval and the window are measured from here, which is what makes an edit restart
+     * the clock.
      */
     public Instant lastEventAt() {
         return lastChangedAt != null && lastChangedAt.isAfter(firstSeenAt) ? lastChangedAt : firstSeenAt;

@@ -101,15 +101,10 @@ class IngestRunTest {
         registry.add("quietedit.ingest.fetch.initial-backoff", () -> "1ms");
         registry.add("quietedit.ingest.fetch.request-timeout", () -> "5s");
         registry.add("quietedit.ingest.article.storage-root", storageRoot::toString);
-        // Never cached: robots.txt differs per test, and one test's answer must not
-        // still be in force in the next one.
+        // Never cached: robots.txt differs per test, and one test's answer must not outlive it.
         registry.add("quietedit.ingest.article.robots-cache-ttl", () -> "0ms");
         registry.add("quietedit.ingest.article.robots-failure-cache-ttl", () -> "0ms");
-        // The curve's floor, effectively removed: these tests poll the same article
-        // several times a second, and every one of those looks has to happen. What the
-        // curve actually decides is asserted in RecheckPolicyTest, over days rather
-        // than milliseconds; what the tests below assert is that the run asks it at
-        // all -- which the observation window, left at its default, is enough for.
+        // The curve's floor, removed: these tests poll the same article several times a second.
         registry.add("quietedit.ingest.recheck.min-interval", () -> "1ms");
     }
 
@@ -206,8 +201,7 @@ class IngestRunTest {
         assertThat(version.getRawHtmlRef()).isEqualTo(ingested.rawHtmlRef());
         assertThat(version.getHttpStatus()).isEqualTo(200);
         assertThat(version.getEncoding()).isEqualTo(ingested.encoding());
-        // The feed's pubDate reached the row as an instant in UTC, and as an exact one:
-        // the publisher wrote a real offset, so nothing had to be assumed.
+        // Exact, because the publisher wrote a real offset and nothing had to be assumed.
         assertThat(version.getPublishedAt()).isEqualTo(Instant.parse("2026-08-24T05:14:00Z"));
         assertThat(version.isPublishedAtExact()).isTrue();
         assertThat(ingested.versionId()).isEqualTo(version.getId());

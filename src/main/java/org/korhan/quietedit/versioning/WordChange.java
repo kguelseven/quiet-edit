@@ -3,24 +3,20 @@ package org.korhan.quietedit.versioning;
 import java.util.List;
 
 /**
- * One run of words that differs between two spellings of the same paragraph or
- * title. Produced only inside a {@link ParagraphChange.Changed} or a
- * {@link TitleChange} -- a paragraph that was wholly added, removed or moved has
- * no word-level detail worth carrying.
+ * One run of words that differs between two spellings of the same paragraph or title.
+ * Produced only inside a {@link ParagraphChange.Changed} or a {@link TitleChange} -- a
+ * paragraph wholly added, removed or moved has no word-level detail worth carrying.
  *
- * <p>Words are whitespace-separated tokens of the <em>original</em> text, so a
- * consumer can render them as the publisher spelled them. Whether two tokens are
- * the same word is decided on their folded form, which is why a paragraph whose
- * only difference is a curly quote produces no {@code WordChange} at all.
+ * <p>Words are tokens of the <em>original</em> text so a consumer can render them as the
+ * publisher spelled them, while whether two tokens are the same word is decided on their
+ * folded form -- which is why a curly quote alone produces no {@code WordChange}.
  *
- * <p>Punctuation stays attached to its word. Splitting it off would report
- * "sagte" -> "sagte" plus "." -> "," for a changed sentence ending, which is the
- * same information spread over two entries; a consumer that wants character-level
- * detail can diff the two tokens itself.
+ * <p>Punctuation stays attached to its word: splitting it off would report the same
+ * information spread over two entries, and a consumer wanting character-level detail can
+ * diff the two tokens itself.
  *
- * <p>Indices are positions in the token lists of the two texts, not character
- * offsets: they say where in the sequence the run sits, which is what a renderer
- * walking both token lists needs.
+ * <p>Indices are positions in the two token lists, not character offsets, which is what a
+ * renderer walking both lists needs.
  */
 public sealed interface WordChange {
 

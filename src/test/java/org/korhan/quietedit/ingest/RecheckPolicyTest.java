@@ -249,8 +249,7 @@ class RecheckPolicyTest {
                 stable(twoDaysAgo, NOW.minus(Duration.ofHours(19))),
                 stable(twoDaysAgo, NOW.minus(Duration.ofHours(18)))));
 
-        // All three are due on their own; the third loses to the ceiling, and it is the
-        // one that has waited least.
+        // All three are due on their own; the one that has waited least loses to the ceiling.
         assertThat(plan.due()).containsExactly(0, 1);
         assertThat(plan.at(2)).isEqualTo(RecheckDecision.THROTTLED);
     }
@@ -330,22 +329,13 @@ class RecheckPolicyTest {
     }
 
     /**
-     * The curve, simulated: one article discovered at a known instant, never edited,
-     * walked minute by minute for ten days with every {@code DUE} answered by a check.
+     * One article walked minute by minute for ten days, every {@code DUE} answered by a
+     * check. Twenty-nine requests cover its whole life against the 1440 a fixed
+     * ten-minute interval would spend, two thirds of them in the first day.
      *
-     * <p>The numbers are the arithmetic of the curve rather than targets, and they are
-     * what makes the case against a fixed interval concrete. Twenty-nine requests cover
-     * the article's whole life: five in its first hour, sixteen in its first day and
-     * twenty-one in its first three days -- and none at all after the observation window
-     * closes just short of the seven-day mark. A fixed ten-minute interval, the
-     * shortest this policy ever uses, would have spent 1440 requests over the same ten
-     * days; a fixed interval long enough to be affordable across a catalogue would have
-     * missed the first day, which is where two thirds of this article's attention went.
-     *
-     * <p>The bounds below are loose on purpose. What is being asserted is the shape --
-     * front-loaded, bounded, terminating -- and pinning the exact count would make the
-     * test fail for a deliberate change to {@code ageFactor} without saying anything
-     * about whether the change was wrong.
+     * <p>The bounds are loose on purpose: what is asserted is the shape -- front-loaded,
+     * bounded, terminating -- and pinning the count would fail the test for a deliberate
+     * change to {@code ageFactor}.
      */
     @Test
     void theCurveSpendsItsAttentionOnTheHoursAfterPublicationAndThenStops() {

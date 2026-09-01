@@ -14,86 +14,25 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Turns the extracted prose of an article into the fingerprint that decides
- * whether a re-fetch is a new revision: an equal hash means "nothing changed,
- * store nothing", a different one means "this is a new {@link DocumentVersion}".
+ * Turns the extracted prose into the fingerprint that decides whether a re-fetch is a
+ * new revision.
  *
- * <h2>What is hashed, and why not the HTML</h2>
- * The input is the {@link ArticleContent} produced by the extractor -- the
- * headline plus the paragraph list -- never the raw markup. Publishers rewrite
- * markup constantly: build hashes in class names, reordered attributes, a new ad
- * container, a changed CSS bundle. Hashing that would report a change on nearly
- * every re-fetch and drown the real edits.
+ * <p>The input is the extractor's {@link ArticleContent}, never the raw markup, because
+ * publishers rewrite markup constantly and hashing it would report a change on nearly
+ * every re-fetch.
  *
- * <h2>Insensitive by design</h2>
- * Each field is folded before hashing, so two observations of an unchanged
- * article agree even when the page does not:
- * <ul>
- *   <li><b>Whitespace and invisible characters.</b> Runs collapse to one space,
- *       non-breaking and typographic spaces become that same space, soft hyphens,
- *       zero-width characters and stray control characters disappear. NFC first,
- *       so a precomposed umlaut and a decomposed one are one string.</li>
- *   <li><b>Typographic variants.</b> Curly quotes, guillemets and the German
- *       opening quote fold onto {@code "} and {@code '}; the dash family folds
- *       onto {@code -}; the ellipsis character becomes three dots. A CMS
- *       migration that switches on smart quotes is not an edit.</li>
- *   <li><b>Ad, session and request identifiers</b>, in the {@code name=value}
- *       form as well as bare, are replaced by one marker, so the value they
- *       carry cannot reach the hash.</li>
- *   <li><b>Short relative timestamps</b> ("3 hours ago", "vor 3 Stunden",
- *       "soeben") are replaced by one marker: they change on their own, without
- *       anyone editing the article.</li>
- * </ul>
+ * <p>Each field is folded first -- whitespace, invisible characters, typographic
+ * variants, identifiers and short relative timestamps -- so that two observations of an
+ * unchanged article agree even when the page does not; everything else, letter case and
+ * punctuation included, reaches the digest verbatim.
  *
- * <h2>Sensitive by design</h2>
- * Everything else reaches the hash verbatim, including letter case and
- * punctuation, so a single changed word changes the hash. Paragraph boundaries
- * are part of the input: every field is written length-prefixed, which makes the
- * serialisation injective -- {@code ["ab", "c"]} and {@code ["a", "bc"]} cannot
- * collide, an inserted or deleted paragraph always changes the hash, and a
- * headline moved into the body is not the same content as a headline.
+ * <p>Every field is written length-prefixed, which makes the serialisation injective:
+ * {@code ["ab", "c"]} and {@code ["a", "bc"]} cannot collide and a headline moved into
+ * the body is not the same content as a headline.
  *
- * <h2>Thresholds, and why these values</h2>
- * <ul>
- *   <li>An opaque token needs an alphanumeric run of at least
- *       {@value #MIN_OPAQUE_RUN} characters containing a digit, or
- *       {@value #MIN_HEX_RUN} hex characters. Below that, false positives start
- *       eating real content: at twelve characters {@code SARS-CoV-2-Variante}
- *       still survives (its longest run is {@code Variante}), while
- *       {@code div-gpt-ad-1712345678901-0} and {@code A93F2B77C1D4E5F6} do
- *       not.</li>
- *   <li>Relative timestamps are folded only up to the unit "day". Longer units
- *       are what prose uses narratively -- "vor drei Jahren begann der Krieg" is
- *       content, not a widget -- and a live counter ticking in years does not
- *       exist.</li>
- * </ul>
- *
- * <h2>Known weaknesses</h2>
- * <ul>
- *   <li>An edit confined to a masked span is invisible: correcting "vor zwei
- *       Stunden" to "vor drei Stunden" in narrative prose, or swapping one
- *       identifier for another, produces no new version. The opposite mistake --
- *       reporting a change on every fetch -- was judged worse, because it is the
- *       one that makes the output unusable.</li>
- *   <li>The identifier and relative-time vocabularies are curated for English and
- *       German. A publisher counting in another language keeps its ticking
- *       timestamp in the hash and will look edited on every re-check.</li>
- *   <li>A short numeric identifier without a {@code name=} prefix
- *       ("Anzeige 4711") is indistinguishable from a number in the text and stays
- *       in the hash.</li>
- *   <li>Absolute timestamps rendered into the page ("Aktualisiert: 14:32 Uhr")
- *       are content here. Whether such a line is a real edit is the classifier's
- *       question, and it needs the diff that this hash only gates.</li>
- *   <li>The hash answers "identical or not", nothing else. Two paraphrases of one
- *       sentence are as different as two unrelated articles; near-duplicate
- *       detection belongs to the clustering stage.</li>
- * </ul>
- *
- * <h2>Stability</h2>
- * Hashing is a pure function of its input: no clock, no randomness, no default
- * locale ({@link Locale#ROOT} throughout), no network. The {@value #SCHEME} tag in
- * the serialisation makes a future change to these rules a new scheme rather than
- * a silent reinterpretation of stored hashes.
+ * <p>The {@value #SCHEME} tag makes a future change to these rules a new scheme rather
+ * than a silent reinterpretation of stored hashes; the threshold values and the known
+ * weaknesses are justified in quietedit-es7.
  */
 @Service
 public class ContentHasher {
@@ -107,10 +46,9 @@ public class ContentHasher {
     static final int MIN_HEX_RUN = 16;
 
     /**
-     * Stand-ins for the spans that must not reach the digest. Control characters,
-     * because normalisation strips every control character from the input before
-     * inserting them: no article text can spell a marker and pass itself off as a
-     * masked span.
+     * Control characters, because normalisation strips every control character from the
+     * input before inserting them: no article text can spell a marker and pass itself off
+     * as a masked span.
      */
     private static final String IDENTIFIER = String.valueOf((char) 1);
     private static final String RELATIVE_TIME = String.valueOf((char) 2);
@@ -145,9 +83,8 @@ public class ContentHasher {
             + "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\p{Alnum}])");
 
     /**
-     * {@code name=value} and {@code name: value} pairs whose name is an identifier
-     * name. The name is matched as whole separator-delimited tokens, never as a
-     * substring, so {@code shadow: dark} is not read as an {@code ad} parameter.
+     * The name is matched as whole separator-delimited tokens, never as a substring, so
+     * {@code shadow: dark} is not read as an {@code ad} parameter.
      */
     private static final Pattern IDENTIFIER_ASSIGNMENT = Pattern.compile(
             "(?i)(?<![\\p{Alnum}])(?:[\\p{Alnum}]+[_-])*"
@@ -164,10 +101,7 @@ public class ContentHasher {
 
     private static final Pattern TOKEN_SEPARATOR = Pattern.compile("[_-]+");
 
-    /**
-     * "3 hours ago", "vor wenigen Minuten", "an hour ago". Units stop at the day,
-     * for the reason given in the class documentation.
-     */
+    /** Units stop at the day: longer ones are what prose uses narratively. */
     private static final Pattern RELATIVE_TIME_PHRASE = Pattern.compile("(?i)(?<![\\p{Alnum}])(?:"
             + "vor\\s+(?:\\d{1,3}|einer|einem|eine|ein\\s+paar|wenigen|etwa\\s+\\d{1,3}"
             + "|zwei|drei|vier|f\\u00fcnf|sechs|sieben|acht|neun|zehn|elf|zw\\u00f6lf)"
@@ -181,9 +115,8 @@ public class ContentHasher {
             + ")(?![\\p{Alnum}])");
 
     /**
-     * @param content extracted prose; must not be {@code null}
-     * @return the lowercase hex SHA-256 of the canonical serialisation, 64
-     *         characters, matching {@code document_version.content_hash}
+     * @return the lowercase hex SHA-256 of the canonical serialisation, 64 characters,
+     *         matching {@code document_version.content_hash}
      */
     public String hash(ArticleContent content) {
         Objects.requireNonNull(content, "content");
@@ -192,9 +125,7 @@ public class ContentHasher {
         for (String paragraph : content.paragraphs()) {
             String normalized = normalize(paragraph);
             if (!normalized.isEmpty()) {
-                // A block that was nothing but an ad identifier normalises away
-                // completely; keeping it as an empty field would make its mere
-                // presence in the markup part of the identity.
+                // Keeping an emptied block would make its presence in the markup part of the identity.
                 appendField(canonical, normalized);
             }
         }
@@ -219,17 +150,13 @@ public class ContentHasher {
     }
 
     /**
-     * Folds one text into the form that is hashed. The order is deliberate:
-     * control characters go before markers are inserted, typographic folding
-     * before identifiers are matched (so a token spelled with an en-dash is the
-     * same token), and identifier assignments before bare tokens, so
-     * {@code sessionId=A93F2B77C1D4E5F6} collapses to one marker instead of a
+     * The order is deliberate: control characters before markers are inserted, typographic
+     * folding before identifiers are matched, and identifier assignments before bare
+     * tokens, so {@code sessionId=A93F2B77C1D4E5F6} collapses to one marker rather than a
      * name followed by one.
      *
-     * <p>Public: the diff engine folds paragraphs and words with it, and the
-     * analysis package folds the entries of a ticker's index line, so that all
-     * three agree on when two pieces of text are the same. Tests also read better
-     * against it than against a digest.
+     * <p>Public because the diff engine and the analysis package fold with it too, so that
+     * all three agree on when two pieces of text are the same.
      */
     public String normalize(String text) {
         if (text == null || text.isEmpty()) {
@@ -263,10 +190,8 @@ public class ContentHasher {
     }
 
     /**
-     * A token is opaque when one of its alphanumeric runs looks generated rather
-     * than written: long and containing a digit, or long and hex. Judging the runs
-     * rather than the whole token is what keeps hyphenated real words
-     * ({@code SARS-CoV-2-Variante}) out of the marker.
+     * Judging the alphanumeric runs rather than the whole token is what keeps hyphenated
+     * real words ({@code SARS-CoV-2-Variante}) out of the marker.
      */
     private boolean looksOpaque(String token) {
         for (String run : TOKEN_SEPARATOR.split(token)) {
@@ -280,8 +205,7 @@ public class ContentHasher {
                 digits |= Character.isDigit(character);
                 hexOnly &= Character.digit(character, 16) >= 0;
             }
-            // A digit inside a run this long marks a counter, an id or a hash;
-            // letters alone are a compound noun and have to survive.
+            // A digit in a run this long marks a counter or hash; letters alone are a noun.
             if (digits || (hexOnly && run.length() >= MIN_HEX_RUN)) {
                 return true;
             }

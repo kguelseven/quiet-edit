@@ -9,22 +9,18 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Triggers a full ingest run on demand: the same {@link IngestService#runOnce()}
- * the scheduler calls, so an operator can run a poll without waiting for the timer
- * and without a code path of its own.
+ * Triggers a full ingest run on demand: the same {@link IngestService#runOnce()} the
+ * scheduler calls, so an operator needs no code path of its own.
  *
- * <p>The response mirrors the run's result object rather than exposing it directly.
- * A {@code FeedFetchResult} carries the feed body, and an entity would drag its
- * JPA shape into the API; the records here carry counts, URLs and reasons -- enough
- * to explain a run, never its content.
+ * <p>The response mirrors the run's result object rather than exposing it: a
+ * {@code FeedFetchResult} carries the feed body, and an entity would drag its JPA shape
+ * into the API.
  *
- * <p>Synchronous on purpose: a run over a real catalogue takes minutes, which makes
- * this a operator's endpoint rather than a public one. Turning it into a job with a
- * status resource is a decision the API ticket owns, not this one.
+ * <p>Synchronous on purpose. A run takes minutes, which makes this an operator's endpoint;
+ * turning it into a job with a status resource is a decision the API ticket owns.
  *
- * <p>A trigger that collides with a run already in flight is refused by the service
- * and rendered as Problem Details by {@link IngestExceptionHandler}; no branch for
- * it exists here, because the endpoint holds no decision of its own.
+ * <p>A trigger colliding with a run in flight is refused by the service and rendered by
+ * {@link IngestExceptionHandler}; no branch for it exists here.
  */
 @RestController
 @RequestMapping("/api/ingest")
@@ -87,11 +83,8 @@ public class IngestController {
     }
 
     /**
-     * {@code checked} is the sum of the outcome counts -- what the run planned for.
-     * {@code deferred}, {@code abandoned} and {@code notDue} are the parts of that plan
-     * the run did not fetch: the first to be picked up next run, the second for good,
-     * the third because it was not yet time. Subtracting all three from
-     * {@code checked} is what was fetched.
+     * {@code checked} is the sum of the outcome counts. Subtracting {@code deferred},
+     * {@code abandoned} and {@code notDue} from it is what the run actually fetched.
      */
     public record ArticleSummary(int checked, long created, long changed, long unchanged, long skipped,
                                  long failed, long deferred, long abandoned, long notDue) {
@@ -127,9 +120,9 @@ public class IngestController {
             String reason) {
 
         /**
-         * {@code encoding} is the verdict as prose rather than three fields: over REST
-         * it is read by a person deciding whether a page needs a look, and null for
-         * every article that never got a body.
+         * {@code encoding} is prose rather than three fields: over REST it is read by a
+         * person deciding whether a page needs a look, and null for every article that
+         * never got a body.
          */
         static ArticleItem of(ArticleIngestResult article) {
             return new ArticleItem(article.link(), article.finalUrl(), article.canonicalUrl(),

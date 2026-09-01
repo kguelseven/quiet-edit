@@ -11,37 +11,23 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Reads diffs out of the version store, so that checking whether a stored change is
- * a real edit does not mean writing a lateral join against the paragraph jsonb by
- * hand.
+ * Reads diffs out of the version store, so that checking whether a stored change is a
+ * real edit does not mean writing a lateral join against the paragraph jsonb by hand.
  *
- * <p>Two endpoints, because finding an edit takes two steps:
- * <ul>
- *   <li>{@code GET /api/documents/changed} -- the documents observed to change,
- *       newest change first. The entry point: there is no way to guess a document id.</li>
- *   <li>{@code GET /api/documents/{id}/revisions} -- which revisions that document
- *       has, so the two ordinals the diff takes can be chosen rather than guessed.</li>
- *   <li>{@code GET /api/documents/{id}/diff} -- one diff. With no parameters it is the
- *       newest pair, which is what "what changed" means for an article being watched.</li>
- * </ul>
+ * <p>Three endpoints, because finding an edit takes three steps: the changed documents
+ * (there is no way to guess a document id), that document's revisions, and one diff --
+ * which with no parameters is the newest pair.
  *
- * <p>Read-only and therefore {@code GET}: a diff is a view of stored evidence, so
- * asking for one twice must cost nothing and change nothing.
+ * <p>Read-only and therefore {@code GET}: asking for a diff twice must cost nothing and
+ * change nothing.
  *
- * <h2>Why the response is not the engine's own types</h2>
- * {@link ParagraphChange} and {@link WordChange} are sealed interfaces whose kind is
- * the Java type. That does not survive JSON: a consumer would have to infer the kind
- * from which fields happen to be present. The records here name the kind in a field
- * instead and flatten the four variants into one shape, which is what a client
- * switching on a discriminator needs. Mapping is an exhaustive {@code switch}, so a
- * fifth kind of change added to the engine fails to compile here rather than
- * silently serialising as something else.
+ * <p>The response is not the engine's own types, because {@link ParagraphChange} and
+ * {@link WordChange} carry their kind as a Java type and that does not survive JSON; the
+ * records here name it in a field, mapped by an exhaustive {@code switch}, so a fifth
+ * kind of change fails to compile here rather than serialising as something else.
  *
- * <p>Absent fields are null and mean "does not apply to this kind", not "unknown":
- * a removal has no {@code toIndex} because it is in no later position, and an
- * addition has no {@code fromText} because there was nothing there. A {@code MOVED}
- * carries its text as {@code toText} only -- the two spellings fold alike, and the
- * current page is what a reader sees.
+ * <p>Absent fields mean "does not apply to this kind", not "unknown": a removal is in no
+ * later position, and an addition had nothing there before.
  */
 @RestController
 @RequestMapping("/api/documents")
@@ -61,9 +47,8 @@ public class DiffController {
     }
 
     /**
-     * The document's revisions, oldest first. Oldest first because it is the order the
-     * history happened in, and because the ordinals it prints then read as the
-     * {@code from}/{@code to} of the diff endpoint in the same direction.
+     * Oldest first, so that the ordinals it prints read as the {@code from}/{@code to} of
+     * the diff endpoint in the same direction.
      */
     @GetMapping("/{documentId}/revisions")
     public RevisionsResponse revisions(@PathVariable UUID documentId) {
@@ -83,8 +68,7 @@ public class DiffController {
 
     public record ChangedDocumentsResponse(int count, List<ChangedDocument> documents) {
 
-        // count is the size of this page, not of the table: the listing is capped, and
-        // claiming a total would mean a second query nothing here needs.
+        // The size of this page, not of the table: a total would mean a second query.
     }
 
     public record ChangedDocument(
@@ -106,10 +90,9 @@ public class DiffController {
     }
 
     /**
-     * What revisions a document has. Deliberately carries no paragraph text: the point
-     * is to pick a pair, and shipping every revision's full text would make the
-     * listing cost more than the diff it is meant to precede. {@code contentHash} and
-     * the paragraph count are what distinguish two revisions without reading them.
+     * Carries no paragraph text: the point is to pick a pair, and every revision's full
+     * text would cost more than the diff it precedes. {@code contentHash} and the
+     * paragraph count are what distinguish two revisions without reading them.
      */
     public record RevisionsResponse(
             UUID documentId,
@@ -148,15 +131,12 @@ public class DiffController {
     }
 
     /**
-     * One observation, named the same way on both endpoints: a side of a diff and a row
-     * of the revision listing are the same thing seen twice, and a client that has read
-     * the listing should not have to learn a second shape to read the diff.
+     * Named the same way on both endpoints: a side of a diff and a row of the revision
+     * listing are the same thing seen twice.
      *
-     * <p>{@code contentHash} is included so a reader can tell two revisions apart
-     * without reading their text, and {@code encoding} as prose rather than three
-     * fields, matching the ingest endpoint: an edit that is really a re-decode is the
-     * first thing to rule out, and in the listing it is visible before any diff is
-     * requested at all.
+     * <p>{@code encoding} is prose rather than three fields, matching the ingest endpoint:
+     * an edit that is really a re-decode is the first thing to rule out, and here it is
+     * visible before any diff is requested.
      */
     public record Revision(
             UUID versionId,

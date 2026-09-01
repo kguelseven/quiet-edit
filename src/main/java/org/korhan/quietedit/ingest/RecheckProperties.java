@@ -7,23 +7,16 @@ import java.time.Duration;
 
 /**
  * When a known article is fetched again. Separate from {@link IngestRunProperties}
- * because that one caps how much of the catalogue <em>one run</em> may work through,
- * while these say which candidates are worth offering it in the first place.
+ * because that one caps how much of the catalogue one run may work through, while these
+ * say which candidates are worth offering it at all.
  *
- * <p>Every number's justification is in {@link RecheckPolicy}, next to the code that
- * acts on it. Three of them are worth repeating here because they are the ones an
- * operator would reach for: {@code ageFactor} is the whole curve -- a candidate is
- * re-checked after that fraction of its age -- {@code maxRequestsPerHostPerHour} is
- * the only setting that can refuse work the curve generates, and
- * {@code maxUnconfirmedUpdatedClaims} is how patient this system is with a publisher
- * whose {@code updated} dates never turn out to mean anything.
+ * <p>Every number's justification is in {@link RecheckPolicy}, next to the code that acts
+ * on it.
  *
- * <p>{@code maxCandidatesPerRun} is not a policy number: it is the ceiling on how
- * many stored documents a run reads back to ask the policy about. It exists so that a
- * backlog cannot turn one query into a full table scan into memory. Reading them
- * most-overdue-first means a cut here delays a candidate by a run rather than losing
- * it, and it is deliberately far above {@code quietedit.ingest.run.max-articles},
- * because the policy will say no to many of the rows it sees.
+ * <p>{@code maxCandidatesPerRun} is not a policy number: it caps how many stored
+ * documents a run reads back, so that a backlog cannot turn one query into a full table
+ * scan into memory. Most-overdue-first means a cut here delays a candidate by a run
+ * rather than losing it.
  */
 @ConfigurationProperties("quietedit.ingest.recheck")
 public record RecheckProperties(
@@ -43,9 +36,9 @@ public record RecheckProperties(
     }
 
     /**
-     * The policy these settings describe. Its compact constructor is what validates
-     * the rest: the invariants belong to the rule, not to the configuration format,
-     * and stating them twice would let the two drift apart.
+     * The policy's compact constructor is what validates these settings: the invariants
+     * belong to the rule, not to the configuration format, and stating them twice would let
+     * the two drift apart.
      */
     public RecheckPolicy toPolicy() {
         return new RecheckPolicy(minInterval, maxInterval, ageFactor, observationWindow,

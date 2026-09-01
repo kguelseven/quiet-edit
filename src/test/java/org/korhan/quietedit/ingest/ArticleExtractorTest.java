@@ -49,9 +49,8 @@ class ArticleExtractorTest {
     }
 
     /**
-     * The property T10 hashes and T12 diffs: identical input must produce identical
-     * bytes, across repeated calls and across instances. Compared as bytes, not as
-     * objects, because that is what the hash will see.
+     * Identical input must produce identical bytes, across calls and across instances.
+     * Compared as bytes rather than as objects, because that is what the hash sees.
      */
     @ParameterizedTest(name = "{0}")
     @MethodSource("sources")

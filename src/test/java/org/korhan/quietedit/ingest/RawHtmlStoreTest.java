@@ -41,8 +41,7 @@ class RawHtmlStoreTest {
 
     @Test
     void nonUtf8BytesSurviveTheRoundTrip() {
-        // The store is byte-oriented on purpose: encoding resolution happens later,
-        // and a store that decoded would have destroyed the evidence by then.
+        // Byte-oriented: a store that decoded would destroy what encoding resolution needs.
         byte[] latin1 = "<p>Gruesse</p>".getBytes(StandardCharsets.ISO_8859_1);
         RawHtmlStore store = store();
 

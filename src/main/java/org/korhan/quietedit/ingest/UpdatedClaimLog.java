@@ -12,16 +12,13 @@ import java.util.UUID;
 /**
  * Remembers whether a feed's {@code updated} dates have been telling the truth.
  *
- * <p>This exists because nothing else in the store records that a claim was acted on
- * and led nowhere. A document only records that it was checked, not <em>why</em>, so
- * a publisher whose CMS stamps the render time into {@code updated} looks exactly
- * like a publisher whose articles are being edited constantly -- from the document
- * table both are "checked often, never moved".
+ * <p>Nothing else in the store records that a claim was acted on and led nowhere: a
+ * document records that it was checked, not why, so from the document table a CMS
+ * stamping the render time and a publisher editing constantly are both "checked often,
+ * never moved".
  *
- * <p>The counter it maintains is a strike count on the feed row: consecutive fetches
- * made under a standing claim that found the text unchanged, cleared by any such
- * fetch that appends a revision. What counts and why is in {@link UpdatedClaimTally};
- * what the count is then used for is in {@link RecheckPolicy}.
+ * <p>What counts is in {@link UpdatedClaimTally}; what the count is used for is in
+ * {@link RecheckPolicy}.
  *
  * <p>Read before a run plans anything, written once the run's outcomes are known.
  */
@@ -35,14 +32,11 @@ public class UpdatedClaimLog {
     }
 
     /**
-     * The strike count of each of these feeds.
+     * One query rather than a lookup per candidate: the caller decides every candidate
+     * before fetching any of them.
      *
-     * <p>One query rather than a lookup per candidate: the caller is the ingest run's
-     * planner, which decides every candidate before it fetches any of them, and a
-     * run's candidates come from a handful of feeds however many articles they carry.
-     *
-     * @return a count for every feed asked about, zero where the feed is unknown --
-     *         an unknown feed has no evidence against it and is therefore believed
+     * @return a count for every feed asked about, zero where the feed is unknown -- an
+     *         unknown feed has no evidence against it and is therefore believed
      */
     @Transactional(readOnly = true)
     public Map<UUID, Integer> unconfirmedClaimsOf(Collection<UUID> feedIds) {
@@ -57,16 +51,12 @@ public class UpdatedClaimLog {
     }
 
     /**
-     * Folds one run's evidence about one feed into its strike count.
+     * One short transaction per feed, like every other write a run makes. A feed that
+     * vanished between planning and writing is left alone rather than recreated: the
+     * evidence is about a feed nothing will poll again.
      *
-     * <p>One short transaction per feed, like every other write an ingest run makes:
-     * a run spends nearly all of its wall clock in network I/O, and a transaction
-     * spanning it would pin a connection for all of it. A feed that vanished between
-     * planning and writing is left alone rather than recreated -- the evidence is
-     * about a feed nothing will poll again.
-     *
-     * @return the feed's strike count after this run, or the tally's own reading of
-     *         it when the feed is gone
+     * @return the feed's strike count after this run, or the tally's own reading of it when
+     *         the feed is gone
      */
     @Transactional
     public int record(UUID feedId, UpdatedClaimTally tally) {

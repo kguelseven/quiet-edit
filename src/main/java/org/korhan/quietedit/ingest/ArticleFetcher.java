@@ -14,20 +14,15 @@ import java.util.Locale;
 /**
  * Follows an article link and puts the retrieved HTML in the store.
  *
- * <p>Like {@link FeedFetcher} it never throws: every way a fetch can go wrong is an
- * {@link ArticleFetchResult}, because one publisher's broken page must not end a
- * run. The three non-failure ways it can decline are kept apart on purpose --
- * blocked by robots.txt, skipped as non-HTML, and fetched -- since only the last one
+ * <p>Like {@link FeedFetcher} it never throws: one publisher's broken page must not end a
+ * run. The three non-failure ways it can decline are kept apart because only one of them
  * produces a version and the other two must not look like errors in a report.
  *
- * <p>Politeness, retries and redirect walking live in {@link PoliteHttpFetcher};
- * what this class adds is the article-specific policy: robots.txt on every hop, the
- * HTML/non-HTML decision, and storing the body.
+ * <p>Politeness, retries and redirect walking live in {@link PoliteHttpFetcher}; what
+ * this class adds is robots.txt on every hop, the HTML decision, and storing the body.
  *
- * <p>Nothing is extracted from the HTML here. Text extraction is the next ticket,
- * and the scope boundary is worth keeping sharp: this class is the only place that
- * touches the network, so it stays testable against a stub server without needing a
- * parser to be right.
+ * <p>Nothing is extracted from the HTML here, which keeps the only class that touches the
+ * network testable against a stub server without needing a parser to be right.
  */
 @Component
 public class ArticleFetcher {
@@ -78,8 +73,8 @@ public class ArticleFetcher {
     }
 
     /**
-     * The body is only downloaded for a 2xx that declares something HTML-shaped. A
-     * redirect has no body worth keeping, and an error page's body is not an article.
+     * A redirect has no body worth keeping and an error page's body is not an article, so
+     * only a 2xx declaring something HTML-shaped is downloaded.
      */
     private static boolean htmlBodiesOnly(int status, HttpHeaders headers) {
         if (status < 200 || status >= 300) {

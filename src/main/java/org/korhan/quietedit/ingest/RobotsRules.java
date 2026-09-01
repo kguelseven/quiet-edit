@@ -8,37 +8,22 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
- * The robots.txt rules that apply to us for one origin, and the verdict they give
- * for a path.
+ * The robots.txt rules that apply to us for one origin, and the verdict they give for a
+ * path.
  *
- * <h2>Which group applies</h2>
- * Groups are selected as RFC 9309 describes: the group whose {@code User-agent}
- * value is the most specific match for our product token wins, and only that group
- * is read -- a specific group replaces the {@code *} group, it does not add to it.
- * Several groups naming the same agent are merged, because publishers do split
- * their rules across repeated blocks. A group is matched case-insensitively and by
- * substring, which is what crawlers in the wild do and what publishers therefore
- * write their rules against.
+ * <p>Groups are selected as RFC 9309 describes: the most specific {@code User-agent}
+ * match wins and only that group is read, matched case-insensitively and by substring,
+ * which is what crawlers in the wild do and what publishers write their rules against.
  *
- * <h2>Which rule wins</h2>
- * The longest matching pattern decides, and {@code Allow} wins a tie. That order
- * matters: a site that disallows {@code /} and allows {@code /news/} means the
- * second, and reading the rules top to bottom instead would lock us out of the
- * whole site. {@code *} and a trailing {@code $} are honoured. An empty
- * {@code Disallow} is not a rule at all -- it is the documented way of saying "no
- * restrictions" -- so it is dropped rather than treated as "disallow everything".
+ * <p>The longest matching pattern decides and {@code Allow} wins a tie: a site that
+ * disallows {@code /} and allows {@code /news/} means the second, where reading top to
+ * bottom would lock us out of the whole site.
  *
- * <h2>Known weaknesses</h2>
- * <ul>
- *   <li>Paths are compared as written. A rule spelling a character percent-encoded
- *       while the URL spells it literally (or the reverse) will not match. Encoding
- *       both sides consistently needs a decision about which bytes are safe to
- *       re-encode, and getting that wrong silently widens what we crawl.</li>
- *   <li>{@code Sitemap} and every other non-group directive is ignored; nothing in
- *       this system discovers URLs from a sitemap.</li>
- *   <li>{@code Crawl-delay} is not part of RFC 9309 but is respected anyway,
- *       clamped by configuration -- see {@link ArticleFetchProperties}.</li>
- * </ul>
+ * <p>An empty {@code Disallow} is the documented way of saying "no restrictions", so it
+ * is dropped rather than read as "disallow everything".
+ *
+ * <p>Paths are compared as written, and the remaining weaknesses are justified in
+ * quietedit-8he.
  */
 public record RobotsRules(List<Rule> rules, Duration crawlDelay) {
 
@@ -55,10 +40,8 @@ public record RobotsRules(List<Rule> rules, Duration crawlDelay) {
     }
 
     /**
-     * Everything is off limits. Used when robots.txt exists but could not be read
-     * (5xx, transport failure): RFC 9309 treats an unreachable robots.txt as a full
-     * disallow, and guessing "probably fine" is exactly the guess a publisher would
-     * mind.
+     * Used when robots.txt exists but could not be read: RFC 9309 treats an unreachable
+     * robots.txt as a full disallow, and "probably fine" is the guess a publisher minds.
      */
     public static RobotsRules denyAll() {
         return new RobotsRules(List.of(new Rule(false, "/")), Duration.ZERO);
@@ -91,9 +74,8 @@ public record RobotsRules(List<Rule> rules, Duration crawlDelay) {
     }
 
     /**
-     * @param pathAndQuery the request target as sent on the wire, i.e. path plus
-     *                     query string -- robots.txt patterns are written against
-     *                     that form, not against the path alone
+     * @param pathAndQuery the request target as sent on the wire, which is the form
+     *                     robots.txt patterns are written against
      */
     public boolean allows(String pathAndQuery) {
         String target = pathAndQuery == null || pathAndQuery.isEmpty() ? "/" : pathAndQuery;
@@ -159,9 +141,8 @@ public record RobotsRules(List<Rule> rules, Duration crawlDelay) {
     }
 
     /**
-     * Splits the file into groups. Consecutive {@code User-agent} lines belong to
-     * one group; the first rule line ends the header, and the next
-     * {@code User-agent} after a rule starts a new group.
+     * Consecutive {@code User-agent} lines belong to one group; the first rule line ends
+     * the header, and the next {@code User-agent} after a rule starts a new group.
      */
     private static List<Group> groups(String body) {
         List<Group> groups = new ArrayList<>();

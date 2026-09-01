@@ -22,8 +22,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * <p>The interval is a parameter of the call rather than of the limiter, so that a
  * host asking for a longer gap in robots.txt gets it without a second limiter.
  *
- * <p>Gates are never evicted. The key space is the set of hosts in the feed
- * catalogue, so it is bounded by configuration, not by traffic.
+ * <p>Gates are never evicted: the key space is the set of hosts in the feed catalogue,
+ * so it is bounded by configuration rather than by traffic.
  */
 @Component
 public class HostRateLimiter {

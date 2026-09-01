@@ -105,8 +105,7 @@ class SchemaSmokeTest {
         assertThat(readVersion.getEncoding())
                 .isEqualTo(new EncodingVerdict("UTF-8", CharsetSource.HTTP_HEADER, true));
 
-        // A version that recorded no verdict has to read back as "unknown", not as a
-        // clean decode: getEncoding() is null while the flag column keeps its default.
+        // No verdict reads back as "unknown", not as a clean decode: null verdict, flag at its default.
         assertThat(versions.findById(firstId).orElseThrow().getEncoding()).isNull();
 
         Change readChange = changes.findById(changeId).orElseThrow();

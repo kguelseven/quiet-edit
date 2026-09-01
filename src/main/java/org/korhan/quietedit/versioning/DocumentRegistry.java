@@ -15,23 +15,19 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Resolves an observed article to the document it belongs to, creating that
- * document the first time its canonical URL is seen.
+ * Resolves an observed article to the document it belongs to, creating that document the
+ * first time its canonical URL is seen.
  *
- * <p>This is identity, not versioning: it decides <em>which</em> article an
- * observation is about and records that the article was looked at. Whether the
- * observation differs from the last one -- and therefore whether a new revision
- * has to be appended -- is the version store's decision, and {@code versionCount}
- * and {@code lastChangedAt} stay untouched here for exactly that reason.
+ * <p>Identity, not versioning: whether the observation differs from the last one is the
+ * version store's decision, which is why {@code versionCount} and {@code lastChangedAt}
+ * stay untouched here.
  *
- * <p>It also reads that record back. Whoever decides when a document is looked at
- * again needs to know when it was last looked at, and the alternative -- handing the
- * document repository to the ingest package -- would put the entity's setters there
- * too. What it hands out is {@link DocumentObservation}, never the entity.
+ * <p>It also reads that record back, because whoever decides when a document is looked at
+ * again needs to know when it was last looked at; the alternative, handing the repository
+ * to the ingest package, would put the entity's setters there too.
  *
- * <p>Lives in {@code versioning} rather than in {@code ingest} because the document
- * table is this package's, and because the version store will grow from here rather
- * than beside it.
+ * <p>Lives in {@code versioning} rather than in {@code ingest} because the document table
+ * is this package's.
  */
 @Service
 public class DocumentRegistry {
@@ -43,29 +39,21 @@ public class DocumentRegistry {
     }
 
     /**
-     * One short transaction per article on purpose: an ingest run spends most of its
-     * wall clock in network I/O, and a transaction spanning the run would pin a
-     * connection for all of it while making one unusable document cost every other.
+     * One short transaction per article: an ingest run spends most of its wall clock in
+     * network I/O, and a transaction spanning the run would pin a connection for all of it.
      *
-     * <p>The observed origin is written once and never overwritten. A document is
-     * always discovered through a feed link, so the first value is the page a
-     * publisher's own feed pointed at, and that is the page a re-check should keep
-     * asking for. Overwriting it would defeat the point: in the run that first learns
-     * the origin the document is still fetched from both addresses, and letting the
-     * later of the two win would just flip the recorded origin back and forth with the
-     * text.
+     * <p>The observed origin is written once and never overwritten. A document is always
+     * discovered through a feed link, so the first value is the page the publisher's own
+     * feed pointed at; in the run that first learns the origin the document is fetched from
+     * both addresses, and letting the later win would flip the recorded origin back and
+     * forth with the text.
      *
-     * <p>Two known limits of write-once, both accepted here. A publisher that moves
-     * its article leaves the origin pointing at a URL that redirects -- which the
-     * fetcher follows -- or eventually 404s, and a link that keeps failing is dropped
-     * by the attempt log's give-up rule rather than retried forever. And if two feeds
-     * carry two different origins for one canonical URL, only one of them is recorded;
-     * the other feed's link is still fetched under the same identity, so that case
-     * still alternates. No feed in the current catalogue does it, and closing it needs
-     * origin-level version rows rather than one column.
+     * <p>Two accepted limits of write-once: a moved article leaves the origin pointing at a
+     * URL that redirects or eventually 404s, which the attempt log's give-up rule handles,
+     * and two feeds carrying two origins for one canonical URL still alternate. Closing the
+     * second needs origin-level version rows rather than one column.
      *
-     * @param observedOriginUrl the page this observation's text was fetched from,
-     *                          already canonicalised so that it compares equal to the
+     * @param observedOriginUrl already canonicalised, so that it compares equal to the
      *                          identity a feed link resolves to before any fetch
      */
     @Transactional
@@ -87,21 +75,16 @@ public class DocumentRegistry {
     }
 
     /**
-     * What is known about each of these URLs, keyed by the URL asked for. URLs with no
-     * document are absent from the result rather than mapped to a placeholder: "we
-     * have never seen this" is the caller's own concept, and a placeholder would have
-     * to invent timestamps for it.
+     * Keyed by the URL asked for. URLs with no document are absent rather than mapped to a
+     * placeholder, which would have to invent timestamps for them.
      *
-     * <p>A URL matches a document by identity or by observed origin, which is what
-     * lets a caller recognise a syndicated copy from the link its own feed advertises
-     * -- that link is the origin, and the document is filed under the other
-     * publisher's canonical URL.
+     * <p>A URL matches by identity or by observed origin, which is what lets a caller
+     * recognise a syndicated copy from the link its own feed advertises.
      *
-     * <p>Identity wins where both could answer, in the one case where they disagree: a
-     * URL that is one document's canonical URL and another document's origin. Filing it
-     * under the document it identifies is the answer that cannot be wrong, and the
-     * order of the two passes below is what guarantees it regardless of row order.
-     * {@code canonical_url} is unique, so there is never a contest within a pass.
+     * <p>Identity wins where both could answer -- a URL that is one document's canonical
+     * URL and another's origin -- because filing it under the document it identifies is the
+     * answer that cannot be wrong. The order of the two passes guarantees that regardless
+     * of row order, and {@code canonical_url} is unique, so no pass has a contest.
      */
     @Transactional(readOnly = true)
     public Map<String, DocumentObservation> observationsOf(Collection<String> urls) {
@@ -125,15 +108,9 @@ public class DocumentRegistry {
     }
 
     /**
-     * Documents that may be due for another look, most overdue first, capped at
-     * {@code limit}.
-     *
-     * <p>Deliberately a coarse filter with the decision left to the caller: when a
-     * document is fetched again is the re-check policy's rule, and this class knows
-     * nothing about it beyond the three bounds it is handed. Ordering by
-     * {@code lastCheckedAt} is what makes the cap safe -- a row the limit cuts off is
-     * more recently checked than every row above it, so it comes back on the next run
-     * rather than being lost.
+     * A coarse filter with the decision left to the caller, which knows the re-check rule.
+     * Ordering by {@code lastCheckedAt} is what makes the cap safe: a row the limit cuts
+     * off is more recently checked than every row above it, so it comes back next run.
      */
     @Transactional(readOnly = true)
     public List<DocumentObservation> observationsPossiblyDue(Instant checkedBefore, Instant stableWindowStart,

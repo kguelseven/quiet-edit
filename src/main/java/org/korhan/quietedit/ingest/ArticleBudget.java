@@ -7,50 +7,25 @@ import java.util.List;
 import java.util.SequencedSet;
 
 /**
- * Decides which of a run's article candidates fit inside its ceiling, and which
- * this system has stopped trying.
+ * Decides which of a run's article candidates fit inside its ceiling, and which this
+ * system has stopped trying.
  *
- * <p>A run may not follow every link every feed advertises. The per-host gate
- * spaces same-host requests, so an uncapped run over a real catalogue is measured
- * in hours; capping it makes a run's cost predictable and, because the scheduler
- * uses a fixed delay, keeps the poll interval meaningful. What the cap must not do
- * is lose the work it declines -- so the order candidates are admitted in is the
- * load-bearing part, not the number.
+ * <p>The order candidates are admitted in is the load-bearing part, not the number:
+ * ranking by when a candidate was last attempted, oldest first, is what makes the cap
+ * safe to apply repeatedly, because everything deferred keeps the rank that deferred it
+ * and the next run starts where this one stopped.
  *
- * <h2>Least recently attempted first</h2>
- * A candidate is ranked by when it was last <em>attempted</em>, oldest first, and a
- * candidate never attempted counts as infinitely old. That is what makes the cap
- * safe to apply repeatedly: everything the run defers keeps the rank that got it
- * deferred, while everything the run tried moves to the back, so the next run starts
- * exactly where this one stopped. Taking candidates in feed order instead would
- * re-fetch the same head of the catalogue forever and never reach its tail.
+ * <p>Attempted, not fetched: ranking by "last produced a document" would leave a link
+ * that yields nothing -- robots.txt, a paywall stub, a binary -- at the front of every
+ * following run and starve every real article behind it.
  *
- * <p>Attempted, not fetched: what counts is that the run tried, not that the try
- * worked. Ranking by "last produced a document" would leave a link that yields
- * nothing -- refused by robots.txt, a paywall stub, a binary -- at the front of every
- * following run, and more than {@code maxArticles} such links on one catalogue would
- * starve every real article behind them permanently. A failing link now rotates out
- * of the front of the queue on its first attempt, long before it is given up on.
+ * <p>Ties break by candidate position, which is feed order and stable, so two runs over
+ * an unchanged catalogue cannot disagree about what they deferred.
  *
- * <p>Ties are broken by the candidate's position, which is feed order and is itself
- * stable, so the same input always yields the same selection -- two runs over an
- * unchanged catalogue are not allowed to disagree about what they deferred.
- *
- * <h2>Three strikes</h2>
- * Rotation alone is not enough: an unfetchable link still costs one slot of every
- * few runs forever. After {@code maxFailures} consecutive attempts that produced no
- * document, a candidate is abandoned -- reported, but never fetched again. Three is
- * chosen against the failure this is most likely to misjudge, a transient one: a
- * publisher's outage, a rate limit, a timeout. One bad answer is normal and two are
- * plausible, so a single run must not be able to condemn a link; three consecutive
- * runs failing, spaced by the poll interval, is a claim about the link rather than
- * about the moment. A success resets the count, so a link only ever has to survive
- * one good fetch to stay a candidate.
- *
- * <p>Known weakness: abandonment is permanent. A link that becomes fetchable again
- * -- a paywall lifted, a robots.txt relaxed -- is never reconsidered, because nothing
- * re-attempts a candidate that is no longer offered. Reviving abandoned links needs
- * a policy of its own and is tracked separately.
+ * <p>Rotation alone still costs one slot of every few runs forever, so after
+ * {@code maxFailures} consecutive attempts that produced no document a candidate is
+ * abandoned and a success resets the count; the choice of three strikes and the
+ * permanence of abandonment are justified in quietedit-10i.4.
  */
 public record ArticleBudget(int maxArticles, int maxFailures) {
 
@@ -64,13 +39,11 @@ public record ArticleBudget(int maxArticles, int maxFailures) {
     }
 
     /**
-     * Splits a run's candidates into the ones it may fetch and the ones it has given
-     * up on. Everything named by neither is deferred to the next run.
+     * Everything named by neither result is deferred to the next run.
      *
-     * @param history what is known about each candidate's earlier attempts, in
-     *                candidate order and never null
-     * @return positions into that list, ascending, so that a caller can walk its
-     *         candidate list once and decide every entry
+     * @param history in candidate order, never null
+     * @return positions into that list, ascending, so a caller can walk its candidate list
+     *         once and decide every entry
      */
     public Selection admit(List<AttemptHistory> history) {
         SequencedSet<Integer> abandoned = new LinkedHashSet<>();

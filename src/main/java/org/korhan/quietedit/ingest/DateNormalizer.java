@@ -22,73 +22,25 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Turns a feed's date text into an instant in UTC, and says how much of that instant
- * the publisher actually supplied.
+ * Turns a feed's date text into an instant in UTC, and says how much of that instant the
+ * publisher actually supplied.
  *
- * <h2>Why the raw text gets this far at all</h2>
- * {@link FeedParser} hands dates on verbatim. Every interesting decision about a
- * feed date -- what a missing timezone means, what a date in the future means, what
- * to do with a format nobody standardised -- needs the characters the publisher
- * wrote, and a parser that returned an {@code Instant} would have made all of those
- * decisions silently and thrown the evidence away. They are made here instead, once,
- * and the {@code exact} flag on {@link NormalisedDate} carries the uncertainty
- * forward instead of hiding it.
+ * <p>The raw text gets this far because every interesting decision about a feed date --
+ * what a missing timezone means, what a date in the future means -- needs the characters
+ * the publisher wrote, and the {@code exact} flag on {@link NormalisedDate} carries the
+ * remaining uncertainty forward instead of hiding it.
  *
- * <h2>Published and updated are never conflated</h2>
- * This class normalises <em>one</em> date text and knows nothing about any other
- * field of the entry. There is deliberately no method that takes an entry and picks
- * a date from it: the moment one existed, "fall back to {@code updated} when {@code
- * published} is missing" would be one line away, and a document whose publication
- * date silently tracks its last edit is exactly the document this system can no
- * longer reason about. An entry with only an {@code updated} date therefore has no
- * publication date, and says so.
+ * <p>One date text at a time, with deliberately no method that takes an entry: the moment
+ * one existed, "fall back to {@code updated} when {@code published} is missing" would be
+ * one line away, and a publication date that silently tracks the last edit is exactly the
+ * document this system can no longer reason about.
  *
- * <h2>Which formats are accepted</h2>
- * Two families, tried in order:
- * <ul>
- *   <li>ISO 8601 / RFC 3339, as Atom uses it: {@code 2026-08-18T06:02:00Z},
- *       {@code +02:00}, {@code +0200} and {@code +02} offsets, optional seconds,
- *       optional fractional seconds, a bare date, and the space-instead-of-T
- *       spelling that appears in hand-built feeds.</li>
- *   <li>RFC 822 / RFC 2822, as RSS uses it: {@code Tue, 18 Aug 2026 07:14:00 +0200},
- *       with an optional day-of-week, one- or two-digit day, two- or four-digit
- *       year, optional seconds, and the alphabetic zone names of RFC 822 §5.1.</li>
- * </ul>
- * Both are parsed case-insensitively and in {@link Locale#ENGLISH}: English month
- * and day abbreviations are what the two formats specify, and resolving them against
- * the server's default locale would make ingest depend on where it runs.
+ * <p>Both formats are parsed in {@link Locale#ENGLISH}, which is what they specify;
+ * resolving month names against the server's default locale would make ingest depend on
+ * where it runs.
  *
- * <h2>The assumptions, stated</h2>
- * <ul>
- *   <li><b>Missing timezone</b> -- assumed UTC, result flagged inexact. The
- *       alternatives are worse: the server's zone would make the same feed parse
- *       differently on two machines, and the publisher's zone is not knowable from
- *       the feed. The error is bounded by the range of real offsets, so at most
- *       roughly half a day, and the flag says it is there.</li>
- *   <li><b>Date without a time</b> -- midnight UTC, flagged inexact, for the same
- *       reason: it is an interval, and its start is the one point in it that does
- *       not drift.</li>
- *   <li><b>More than {@value #MAX_FUTURE_SKEW_HOURS} hour(s) in the future</b> --
- *       discarded in favour of the retrieval time and logged. A publisher's clock
- *       skew, a template placeholder, or an embargo date would otherwise put an
- *       article ahead of everything real. One hour of tolerance absorbs ordinary
- *       clock drift and the "posted a minute from now" scheduling that CMSs do,
- *       without letting a genuinely wrong date through. The retrieval time is not a
- *       publication date, so the result is flagged inexact.</li>
- *   <li><b>An unrecognised alphabetic zone</b> -- dropped, which lands the value in
- *       the missing-timezone case above. RFC 822's military zones are famously
- *       sign-reversed and RFC 2822 §4.3 says to treat them as unknown; local
- *       inventions such as {@code MEZ} are unknown by definition. Assuming UTC and
- *       flagging it beats discarding an otherwise perfectly good timestamp.</li>
- * </ul>
- *
- * <h2>Known weaknesses</h2>
- * A two-digit year is read into 1970-2069 ({@link #RFC_822}'s reduced year), so a
- * feed republishing something from 1969 would date it 2069. Feeds that old do not
- * exist and the alternative -- a windowing rule of our own -- would be a guess with
- * more moving parts. Dates in a non-Gregorian calendar, or written in a language's
- * own month names, are not parsed at all and come back absent; they are vanishingly
- * rare in RSS and Atom, both of which specify English.
+ * <p>The assumption behind each inexact case, the future-skew tolerance and the known
+ * weaknesses are justified in quietedit-m4p.
  */
 public final class DateNormalizer {
 
@@ -99,14 +51,13 @@ public final class DateNormalizer {
     /** How far ahead of the retrieval time a publisher's date is still believed. */
     private static final Duration MAX_FUTURE_SKEW = Duration.ofHours(MAX_FUTURE_SKEW_HOURS);
 
-    /** What a date without a zone is read as. Documented in the class Javadoc. */
+    /** What a date without a zone is read as; the result is flagged inexact. */
     private static final ZoneOffset ASSUMED_ZONE = ZoneOffset.UTC;
 
     /**
-     * The alphabetic zones of RFC 822 §5.1 that carry a defined offset. The North
-     * American abbreviations are fixed offsets, not zone ids, on purpose: {@code EST}
-     * in a feed means UTC-5, and resolving it to a zone would apply a summer-time rule
-     * the publisher already applied by writing {@code EDT} instead.
+     * The North American abbreviations are fixed offsets, not zone ids: {@code EST} in a
+     * feed means UTC-5, and resolving it to a zone would apply a summer-time rule the
+     * publisher already applied by writing {@code EDT} instead.
      */
     private static final Map<String, String> NAMED_ZONES = Map.ofEntries(
             Map.entry("UT", "+0000"), Map.entry("GMT", "+0000"), Map.entry("UTC", "+0000"),
@@ -138,9 +89,7 @@ public final class DateNormalizer {
             .appendValue(ChronoField.MINUTE_OF_HOUR, 2)
             .optionalStart().appendLiteral(':').appendValue(ChronoField.SECOND_OF_MINUTE, 2).optionalEnd()
             .appendFraction(ChronoField.NANO_OF_SECOND, 0, 9, true)
-            // Three spellings of the same offset. Each is optional and they are tried in
-            // turn, so the first one that fits consumes the text and the rest find nothing
-            // left to read; an offset can therefore never be parsed twice.
+            // Three optional spellings of one offset, tried in turn, so the first that fits consumes it.
             .optionalStart().appendOffset("+HH:MM", "Z").optionalEnd()
             .optionalStart().appendOffset("+HHMM", "Z").optionalEnd()
             .optionalStart().appendOffset("+HH", "Z").optionalEnd()
@@ -149,8 +98,7 @@ public final class DateNormalizer {
 
     private static final DateTimeFormatter RFC_822 = new DateTimeFormatterBuilder()
             .parseCaseInsensitive()
-            // The day-of-week is redundant with the date and publishers write it with or
-            // without its comma, so it is read and discarded rather than checked.
+            // Redundant with the date, written with or without its comma, so it is discarded.
             .optionalStart()
             .appendPattern("EEE")
             .optionalStart().appendLiteral(',').optionalEnd()
@@ -180,9 +128,8 @@ public final class DateNormalizer {
     }
 
     /**
-     * @param raw         one date field exactly as the feed wrote it, or null
-     * @param retrievedAt when this entry was fetched; the reference point for "in the
-     *                    future" and the replacement for a date that is
+     * @param retrievedAt the reference point for "in the future", and what replaces a date
+     *                    that is
      * @return never null; {@link NormalisedDate#ABSENT} when nothing usable was there
      */
     public static NormalisedDate normalize(String raw, Instant retrievedAt) {
@@ -223,15 +170,13 @@ public final class DateNormalizer {
         } else {
             instant = LocalDate.from(parsed).atStartOfDay().toInstant(ASSUMED_ZONE);
         }
-        // An offset the publisher wrote is the only thing that makes a date exact: a
-        // date alone is an interval, and an assumed zone is a guess with a name.
+        // An offset the publisher wrote is the only thing that makes a date exact.
         return atMost(instant, zoned && timed, raw, retrievedAt);
     }
 
     /**
-     * A date ahead of the retrieval time by more than the tolerance says more about
-     * the publisher's clock or CMS than about the article, so the one timestamp we
-     * measured ourselves replaces it.
+     * A date that far ahead says more about the publisher's clock or CMS than about the
+     * article, so the one timestamp we measured ourselves replaces it.
      */
     private static NormalisedDate atMost(Instant instant, boolean exact, String raw, Instant retrievedAt) {
         if (instant.isAfter(retrievedAt.plus(MAX_FUTURE_SKEW))) {
@@ -244,14 +189,9 @@ public final class DateNormalizer {
     }
 
     /**
-     * Everything the formatters should not have to know about: whitespace a publisher
-     * left in the element, RFC 2822's parenthesised comments, the alphabetic zone
-     * names that {@link DateTimeFormatter} has no locale-free way to read, and the
-     * space-for-{@code T} spelling.
-     *
-     * <p>An unknown alphabetic zone is removed rather than kept, which leaves a text
-     * with no zone at all -- and that is exactly the case the assumed-UTC rule already
-     * handles, flag included.
+     * Everything the formatters should not have to know about. An unknown alphabetic zone
+     * is removed rather than kept, which leaves the text in the assumed-UTC case that is
+     * already handled, flag included.
      */
     private static String clean(String raw) {
         String text = raw.strip().replaceAll("\\s+", " ");

@@ -1,9 +1,6 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
-<!--
-  Shared pieces of both pages. No layout dialect: plain Thymeleaf fragments keep the
-  dependency list at one starter, which is what "no additional build step" means here.
--->
+<!-- No layout dialect: plain fragments keep the dependency list at one starter. -->
 <head th:fragment="head(title)">
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -12,11 +9,7 @@
 </head>
 <body>
 
-<!--
-  A run of marked and unmarked segments. The space between two segments is template
-  text outside the span, so a highlight never covers the space after it, and every
-  piece of article text goes through th:text and is escaped.
--->
+<!-- The space between two segments is template text outside the span, so a highlight never covers it. -->
 <span th:fragment="marked(segments)" class="marked"
     ><th:block th:each="segment,i : ${segments}"
         ><th:block th:unless="${i.first}"> </th:block
@@ -25,11 +18,7 @@
     ></th:block
 ></span>
 
-<!--
-  The zone is named once, here, because every timestamp on every page is rendered in
-  it: the stored instants are UTC, and a local time without its zone is only readable
-  by someone who already knows which one was chosen.
--->
+<!-- Named once, here: a local time without its zone is only readable by whoever chose it. -->
 <header th:fragment="masthead" class="masthead">
     <a class="wordmark" th:href="@{/}">quietedit</a>
     <span class="tagline">silent edits to news articles</span>

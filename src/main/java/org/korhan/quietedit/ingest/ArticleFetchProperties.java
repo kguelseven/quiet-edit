@@ -10,9 +10,7 @@ import java.time.Duration;
 /**
  * Limits that only apply to article requests. Timeouts, the retry budget and the
  * per-host interval are deliberately <em>not</em> repeated here: articles and feeds
- * hit the same publishers, so they share {@link FeedFetchProperties}. What is
- * article-specific is the redirect budget, the size of a body worth reading, and
- * where the raw HTML is kept.
+ * hit the same publishers, so they share {@link FeedFetchProperties}.
  *
  * <p>{@code maxCrawlDelay} caps what a {@code Crawl-delay} in robots.txt can cost
  * us. The directive is honoured because respecting robots.txt is the point, but an
