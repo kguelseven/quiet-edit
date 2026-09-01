@@ -8,47 +8,21 @@ import java.util.Optional;
  * Decides whether the difference between two versions is explained by how their bytes
  * were decoded rather than by anyone editing the article.
  *
- * <p>The case this exists for: a publisher serves latin-1 bytes while declaring
- * {@code utf-8}. The body cannot be decoded as declared, so it is decoded with U+FFFD
- * substituted -- and from then on the mojibake is stored, hashed and diffed as if it
- * were prose. The day the publisher fixes the header, the next observation differs from
- * the previous one in every affected character, and a diff-only classifier can only
- * call that a rewrite. It is the opposite: nothing was written.
+ * <p>The case this exists for: a publisher serving latin-1 bytes while declaring
+ * {@code utf-8} has its mojibake stored, hashed and diffed as if it were prose, so the
+ * day the header is fixed a diff-only classifier can only call the result a rewrite.
  *
- * <p>The signal is the {@code replaced} flag flipping between the two verdicts, not
- * the charset name changing. A page can move from windows-1252 to UTF-8 with both
- * decodes clean and the text byte-for-byte identical, so the charset name on its own
- * predicts nothing. The flag is a statement about whether characters were lost, which
- * is the thing that actually shows up in the diff.
+ * <p>The signal is the {@code replaced} flag flipping, not the charset name changing: a
+ * page can move from windows-1252 to UTF-8 with both decodes clean and the text
+ * identical, so the name alone predicts nothing.
  *
- * <p>Three shapes count, all of them "the decode changed":
- * <ul>
- *   <li>lossy then clean -- the repair itself, and the case named in the ticket;</li>
- *   <li>clean then lossy -- the same event running backwards, when a publisher breaks
- *       a header that used to be right. Still nobody editing anything;</li>
- *   <li>lossy both times through different charsets -- still undecodable, but failing
- *       differently, so the U+FFFD land in different places and the diff moves.</li>
- * </ul>
+ * <p>Three shapes count -- lossy then clean, clean then lossy, and lossy both times
+ * through different charsets -- because all three mean the decode changed.
  *
- * <p>Two known weaknesses, both deliberate:
- * <ul>
- *   <li><b>A real edit shipped together with the repair is hidden.</b> When a publisher
- *       fixes their charset and rewrites a paragraph between the same two
- *       observations, the encoding explains part of the difference and this rule claims
- *       the whole of it. Separating the two would mean decoding the old bytes under the
- *       new charset and diffing that against the new text -- which needs the raw bytes
- *       of the earlier fetch, not just its text. The rationale therefore says that the
- *       encoding accounts for the difference, not that nothing else did, so the pair
- *       stays reviewable.</li>
- *   <li><b>A clean-to-clean charset switch is not claimed.</b> Bytes can be valid in
- *       two charsets and mean different characters in each, so a switch between two
- *       clean decodes can move the text with nobody editing it. It is not claimed here
- *       because it is indistinguishable from a genuine edit without inferring the real
- *       encoding from the bytes -- content detection, which the encoding work
- *       explicitly excluded. Such a pair is classified by its content, which errs
- *       towards reporting a change that turns out to be cosmetic rather than towards
- *       hiding one.</li>
- * </ul>
+ * <p>The rationale says the encoding accounts for the difference, not that nothing else
+ * did, so a real edit shipped with the repair leaves the pair reviewable; a
+ * clean-to-clean charset switch is not claimed at all, because telling it from an edit
+ * needs content detection; both weaknesses are justified in quietedit-10i.7.
  */
 public final class EncodingRepair {
 
@@ -64,8 +38,7 @@ public final class EncodingRepair {
      */
     public static Optional<String> explain(EncodingVerdict from, EncodingVerdict to) {
         if (from == null || to == null) {
-            // An unrecorded verdict is not evidence of a clean decode; claiming a repair
-            // from a missing fact would relabel ordinary edits on older versions.
+            // An unrecorded verdict is not evidence of a clean decode, only a missing fact.
             return Optional.empty();
         }
         if (to.lossFlippedFrom(from)) {

@@ -29,41 +29,32 @@ import java.util.UUID;
  * Builds the two pages of the reading interface out of the data the REST endpoints
  * already serve.
  *
- * <p>Nothing here computes a diff of its own: {@link DiffService} answers what changed
- * and {@link InPlaceEdit} judges whether the change is a rewrite. What this class adds
- * is the shape a template can iterate -- word changes resolved into marked runs, and a
- * listing narrowed by filters a person set in a form.
+ * <p>Nothing here computes a diff of its own; what this class adds is the shape a
+ * template can iterate.
  *
- * <h2>The rewritten-only filter runs after the query, not in it</h2>
- * Whether a revision only added paragraphs is a property of its diff, and a diff is
- * computed from two jsonb documents rather than stored. So it cannot be a predicate:
- * the rows are fetched, then each candidate's newest pair is diffed and judged. The
- * cost is one extra revision read and one diff per row, paid only when the filter is
- * on, and the page it serves is read by a person scrolling.
+ * <p>The rewritten-only filter runs after the query, because whether a revision only
+ * added paragraphs is a property of its diff and a diff is computed rather than stored;
+ * the cost is one extra revision read and one diff per row, paid only when it is on.
  *
- * <p>That is also why the filter reports what it hid. A page of ten rows out of a
- * hundred fetched is a different answer from a page of ten rows out of ten, and the
- * count is the only thing that tells them apart.
+ * <p>That filter reports what it hid, because ten rows out of a hundred fetched is a
+ * different answer from ten out of ten and the count is the only thing that says which.
  *
- * <h2>Reading, only</h2>
- * Every method is read-only, like the endpoints below it. Looking at a diff must not
- * become part of the history of the article.
+ * <p>Every method is read-only: looking at a diff must not become part of the history of
+ * the article.
  */
 @Service
 public class ChangeBrowserService {
 
     /**
-     * Ceiling on one page of the listing. Higher than the REST listing's default
-     * because scrolling is the whole interaction here, and the rewritten-only filter
-     * removes rows after the fact -- a small page would leave a reader with three rows
-     * and no way to see more.
+     * Higher than the REST listing's default because scrolling is the whole interaction
+     * here, and the rewritten-only filter removes rows after the fact -- a small page would
+     * leave a reader with three rows and no way to see more.
      */
     static final int MAX_ROWS = 200;
 
     /**
-     * How many feeds the coverage summary names. Five, because it is a glance beside the
-     * filters and not a second table: the busiest handful is what says whether articles
-     * are arriving, and a list of every subscribed source would be scrolled past.
+     * Five, because it is a glance beside the filters and not a second table: the busiest
+     * handful is what says whether articles are arriving.
      */
     static final int SUMMARISED_FEEDS = 5;
 
@@ -138,12 +129,9 @@ public class ChangeBrowserService {
     }
 
     /**
-     * Whether this revision touched text that was already there.
-     *
-     * <p>Compared against the revision before it, which exists for every ordinal above
-     * one because the version store numbers contiguously. A missing predecessor is
-     * therefore not a data state to hide a row for: it is unjudgeable, and an
-     * unjudgeable row stays visible rather than being filtered away on a guess.
+     * Compared against the revision before it, which exists for every ordinal above one
+     * because the version store numbers contiguously. A missing predecessor is unjudgeable
+     * rather than a data state, and an unjudgeable row stays visible.
      */
     private boolean rewritesExistingText(DocumentVersion latest) {
         return versions
@@ -202,10 +190,9 @@ public class ChangeBrowserService {
     }
 
     /**
-     * The adjacent pairs of this history, newest first. Adjacent only: any pair is a
-     * legal diff, but the list a reader walks is the sequence of edits that happened,
-     * and offering every combination of a ten-revision history would be forty-five
-     * links to choose between.
+     * Adjacent pairs only: any pair is a legal diff, but the list a reader walks is the
+     * sequence of edits that happened, and every combination of a ten-revision history
+     * would be forty-five links to choose between.
      */
     private static List<DiffPageView.Pair> pairs(DocumentRevisions history, int shownFrom, int shownTo) {
         List<DocumentVersion> revisions = history.revisions();
@@ -221,9 +208,8 @@ public class ChangeBrowserService {
     }
 
     /**
-     * The host of a canonical URL, which is how a reader recognises a publisher at a
-     * glance. Falls back to the whole URL rather than to null: a row whose host cannot
-     * be parsed is still a row worth showing, and the URL says as much as anything.
+     * Falls back to the whole URL rather than to null: a row whose host cannot be parsed is
+     * still worth showing, and the URL says as much as anything.
      */
     private static String hostOf(String canonicalUrl) {
         try {

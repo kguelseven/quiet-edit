@@ -14,8 +14,7 @@
         <span class="muted" th:text="${view.host}">host</span>
     </p>
 
-    <!-- The panels show the minute; the seconds sit in a title attribute, because two
-         revisions of one article can be seconds apart and the display would hide it. -->
+    <!-- Seconds sit in a title attribute: two revisions can be seconds apart. -->
     <section class="revisions">
         <div class="side">
             <h2>Revision <span th:text="${view.from.number}">1</span></h2>
@@ -56,8 +55,7 @@
            th:text="|${pair.from} &rarr; ${pair.to}|">1 &rarr; 2</a>
     </nav>
 
-    <!-- The headline is called out above the body: a retitled article is its own
-         editorial event, not the first of twenty paragraph rows. -->
+    <!-- Above the body: a retitled article is its own editorial event. -->
     <section th:if="${view.title != null}" class="change title-change">
         <h2>The headline changed</h2>
         <p class="before"><span th:replace="~{fragments :: marked(${view.title.before})}"></span></p>

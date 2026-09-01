@@ -15,16 +15,15 @@ import java.time.Duration;
 import java.time.Instant;
 
 /**
- * Performs one conditional GET per feed and never throws: a broken feed is a
- * result with {@link FeedFetchOutcome#FAILED}, not an exception, so that one dead
- * publisher cannot abort a run.
+ * Performs one conditional GET per feed and never throws: a broken feed is a result with
+ * {@link FeedFetchOutcome#FAILED}, so one dead publisher cannot abort a run.
  *
- * <p>Retry policy, straight from the ticket: only 5xx and transport failures
- * (timeout, connection reset) are retried, with exponential backoff. A 4xx is a
- * verdict about our request -- retrying it just burns the host's patience -- and a
- * 304 is a success. Redirects are followed by the client itself
- * ({@link HttpClient.Redirect#NORMAL}), which keeps a permanently moved feed
- * working without rewriting the catalogue.
+ * <p>Only 5xx and transport failures are retried, with exponential backoff. A 4xx is a
+ * verdict about our request and retrying it only burns the host's patience; a 304 is a
+ * success.
+ *
+ * <p>Redirects are followed by the client itself ({@link HttpClient.Redirect#NORMAL}),
+ * which keeps a permanently moved feed working without rewriting the catalogue.
  */
 @Component
 public class FeedFetcher {
@@ -37,8 +36,7 @@ public class FeedFetcher {
     private final Clock clock;
     private final Sleeper sleeper;
 
-    // The parameter is named after the bean on purpose: there are two HttpClient
-    // beans, and the article one must never be injected here (it follows no redirects).
+    // Named after the bean: the article HttpClient must never be injected here, it follows no redirects.
     public FeedFetcher(HttpClient feedHttpClient, FeedFetchProperties properties,
                        HostRateLimiter rateLimiter, Clock clock, Sleeper sleeper) {
         this.feedHttpClient = feedHttpClient;

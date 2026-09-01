@@ -14,52 +14,25 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Turns a feed body into a uniform list of {@link FeedEntry}. RSS 2.0 and Atom 1.0
- * -- and the older RSS dialects that share their element names -- come out
- * indistinguishable; nothing downstream needs to know which format a publisher chose.
+ * Turns a feed body into a uniform list of {@link FeedEntry}; RSS 2.0, Atom 1.0 and the
+ * older dialects that share their element names come out indistinguishable.
  *
- * <p>Mandatory field, singular: {@code link}. This system exists to re-fetch and
- * compare an article, so an entry without a link is not an incomplete entry, it is
- * no entry at all. A missing title, summary or date is normal in the wild and is
- * carried through as null instead of being treated as a defect. An entry that fails
- * the link check is dropped with a reason and the rest of the feed is kept: one
- * broken item in a hundred must not cost us the other ninety-nine.
+ * <p>{@code link} is the one mandatory field, because this system exists to re-fetch and
+ * compare an article; an entry that fails that check is dropped with a reason and the
+ * rest of the feed is kept.
  *
- * <p>Never throws. A body that is not a feed -- truncated XML, an error page served
- * with a feed content type -- becomes a failed result, the same way {@link
- * FeedFetcher} turns a dead publisher into a result rather than an exception.
+ * <p>Never throws: a body that is not a feed becomes a failed result, the same way
+ * {@link FeedFetcher} turns a dead publisher into one.
  *
- * <p>Input is a {@code String}, not the fetcher's {@code byte[]}: which charset
- * those bytes are in is its own decision, with its own conflicting evidence (BOM,
- * Content-Type, XML declaration), and this class would have to guess. Taking
- * already-decoded text keeps that guess out of here. Because the text is decoded,
- * the XML declaration's own {@code encoding} attribute is correctly ignored.
+ * <p>Input is already-decoded text rather than the fetcher's bytes, because which charset
+ * those bytes are in is its own decision with its own conflicting evidence; date fields
+ * are handed on verbatim for the same reason, since what a missing timezone means belongs
+ * to date normalisation.
  *
- * <p>One traversal, one parser. Structure and field texts come from the same jsoup
- * document, so an entry's dates are the dates of that entry by construction rather
- * than by matching two parsers' results by document position. {@link
- * Parser#xmlParser()} keeps element case and namespace prefixes intact, which is
- * what makes {@code dc:date} and {@code pubDate} distinguishable from each other
- * here at all; every element is then matched on its local name, because the prefix a
- * publisher picked carries no information we act on.
- *
- * <p>Date fields are handed on as the publisher wrote them. Parsing them into an
- * instant would mean deciding here what a missing timezone means; that decision
- * belongs to date normalisation, which needs the verbatim text to make it.
- *
- * <p>Known weakness: jsoup's XML parser is deliberately forgiving and repairs a
- * truncated body instead of rejecting it, so the well-formedness that a strict XML
- * parser used to provide has to be reconstructed from the parse. An element whose
- * end tag is missing from the source is recognisable by its zero-width end range
- * that does not sit on its own start tag ({@code <x/>} has a zero-width end range
- * too, but on its own start position), and a body containing one is treated as
- * truncated. This is a property of jsoup's source ranges rather than a documented
- * guarantee; the fixture-driven test for the malformed body is what pins it down.
- * The trade-off bought by staying with jsoup: no strict XML parser is exposed to
- * publisher-controlled input, so DOCTYPE and entity-expansion attacks have no
- * surface here. The parser is also more forgiving than a strict one about damage it
- * can repair locally, such as a stray {@code &}, which costs us nothing: a feed we
- * can read is a feed we can monitor.
+ * <p>One traversal of one {@link Parser#xmlParser()} document, so an entry's dates are
+ * that entry's by construction rather than by matching two parsers' results by position;
+ * the forgiving-parser trade-off and how truncation is recognised without a strict XML
+ * parser are justified in quietedit-94i.
  */
 @Component
 public class FeedParser {
@@ -139,11 +112,10 @@ public class FeedParser {
     }
 
     /**
-     * The dialect label callers already know, kept in rome's spelling so that removing
-     * rome stays invisible from the outside.
+     * Kept in rome's spelling so that removing rome stays invisible from the outside.
      *
-     * @return null when the root element is not a feed root at all, which is how an
-     *         error page served with a feed content type is recognised.
+     * @return null when the root element is not a feed root at all, which is how an error
+     *         page served with a feed content type is recognised
      */
     private static String feedTypeOf(Element root) {
         if (root == null) {
@@ -162,10 +134,9 @@ public class FeedParser {
     }
 
     /**
-     * @return the first element that the source never closes, or null when every
-     *         element has a real end tag. Zero-width end ranges also occur for
-     *         self-closing tags, which sit on their own start position; an element
-     *         closed only because the input ran out does not.
+     * @return the first element the source never closes, or null when every element has a
+     *         real end tag. A self-closing tag has a zero-width end range too, but on its
+     *         own start position; an element closed only because the input ran out does not
      */
     private static Element firstUnclosed(Document document) {
         for (Element element : document.getAllElements()) {
@@ -181,13 +152,10 @@ public class FeedParser {
     }
 
     /**
-     * RSS puts the article URL in the element's text, Atom in an {@code href} with a
-     * relation beside it. Atom permits several links per entry, and only the
-     * alternate representation is the article: {@code related} points at a different
-     * article, {@code self} at the feed. An href without a relation is an alternate
-     * by definition, so it counts as one. A non-article relation is never used, not
-     * even as a last resort -- monitoring the wrong URL is worse than skipping the
-     * entry.
+     * Atom permits several links per entry and only the alternate representation is the
+     * article: {@code related} points at a different one, {@code self} at the feed. A
+     * non-article relation is never used even as a last resort -- monitoring the wrong URL
+     * is worse than skipping the entry.
      */
     private static String linkOf(Element item) {
         String fallback = null;
@@ -216,10 +184,8 @@ public class FeedParser {
     }
 
     /**
-     * The description is the teaser a publisher wrote for the feed; full content, if
-     * present at all, is a copy of the article and belongs to the fetcher's job.
-     * Preferring the description keeps this field one consistent thing across feeds
-     * that carry both.
+     * The description is the teaser a publisher wrote for the feed; full content is a copy
+     * of the article and belongs to the fetcher's job.
      */
     private static String summaryOf(Element item) {
         String summary = firstChildValue(item, SUMMARY_ELEMENTS);
@@ -227,9 +193,8 @@ public class FeedParser {
     }
 
     /**
-     * Matched on the local name, ignoring the namespace prefix: the same date field
-     * arrives as {@code dc:date}, {@code date} or some publisher's own prefix, and
-     * the prefix carries no information we act on.
+     * Matched on the local name: the same field arrives as {@code dc:date}, {@code date}
+     * or some publisher's own prefix, and the prefix carries nothing we act on.
      */
     private static String firstChildText(Element item, Set<String> names) {
         for (Element child : item.children()) {
@@ -244,11 +209,9 @@ public class FeedParser {
     }
 
     /**
-     * Like {@link #firstChildText}, but for fields that carry the publisher's markup.
      * Escaped or CDATA-wrapped HTML is text to an XML parser and comes back verbatim;
-     * markup left unescaped -- an Atom {@code type="xhtml"} body, or a publisher who
-     * simply did not escape -- has been parsed into child elements and is serialised
-     * back rather than flattened, so the entry keeps what was published either way.
+     * markup left unescaped has been parsed into child elements and is serialised back
+     * rather than flattened, so the entry keeps what was published either way.
      */
     private static String firstChildValue(Element item, Set<String> names) {
         for (Element child : item.children()) {

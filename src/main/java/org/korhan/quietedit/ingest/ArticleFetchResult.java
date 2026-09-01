@@ -6,21 +6,17 @@ import java.util.List;
 /**
  * The outcome of following one article link.
  *
- * <p>{@code finalUrl} is the URL the redirect chain ended at, and it -- not the URL
- * the feed advertised -- is what identity is derived from downstream: publishers
- * routinely publish a short link or a tracking hop, and canonicalising the
- * advertised URL would mint a new document every time the redirect target changes.
- * The whole {@code redirectChain} is kept because "which hop rewrote the URL" is the
- * only way to diagnose an identity that drifted.
+ * <p>Identity is derived downstream from {@code finalUrl}, not from the URL the feed
+ * advertised: publishers routinely publish a short link or a tracking hop, and
+ * canonicalising the advertised URL would mint a new document every time the redirect
+ * target changes. The whole {@code redirectChain} is kept because "which hop rewrote the
+ * URL" is the only way to diagnose an identity that drifted.
  *
- * <p>No HTML is carried here, only {@code rawHtmlRef}. The body is on disk in
- * {@link RawHtmlStore} by the time this record exists, and a run fetches hundreds of
- * articles concurrently -- holding every one of them in memory until the run
- * finishes would make peak memory a function of feed size. Whoever needs the markup
- * reads it back through the store, which is also the copy that survives the process.
+ * <p>No HTML is carried, only {@code rawHtmlRef}: a run fetches hundreds of articles
+ * concurrently, and holding every body until it finishes would make peak memory a
+ * function of feed size.
  *
- * <p>Nothing is parsed: this ticket's boundary is retrieval, so the page title and
- * the article text are absent by design.
+ * <p>Nothing is parsed here, so the page title and the article text are absent by design.
  */
 public record ArticleFetchResult(
         String requestedUrl,

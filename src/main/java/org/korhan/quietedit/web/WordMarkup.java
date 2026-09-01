@@ -9,28 +9,18 @@ import java.util.regex.Pattern;
 /**
  * Turns the word changes of an edited paragraph into the runs a reader sees marked.
  *
- * <p>{@link WordChange} says where a run sits in the token list of each side. That is
- * what a renderer needs, but not what a template can iterate: a template cannot ask
- * "is token 9 part of a change". So each side is walked once, the tokens covered by a
- * change are flagged, and neighbouring tokens with the same flag are merged into one
- * {@link Segment}. Merging matters for the result rather than for performance -- three
- * consecutive changed words are one highlighted phrase, not three highlighted words
- * with unhighlighted gaps between them.
+ * <p>{@link WordChange} says where a run sits in each side's token list, which a template
+ * cannot iterate, so each side is walked once and neighbouring tokens with the same flag
+ * are merged: three consecutive changed words are one highlighted phrase, not three.
  *
- * <h2>Which changes mark which side</h2>
- * The two sides are marked from different fields of the same change, because a change
- * does not exist in the same place on both. A removal marks only the earlier text, an
- * addition only the later one, and a replacement marks its own run on each side. The
- * earlier text therefore carries no mark where words were inserted: there is nothing
- * there to mark, and the inserted words are marked on the side they arrived on.
+ * <p>The two sides are marked from different fields of the same change, because a change
+ * does not exist in the same place on both; the earlier text carries no mark where words
+ * were inserted, since there is nothing there to mark.
  *
- * <h2>Whitespace</h2>
- * Tokens are re-joined with single spaces, so a paragraph stored with a double space
- * or a line break inside it renders with one. That is the same tokenisation the diff
- * engine compares on -- the indices in a {@link WordChange} are positions in it, and
- * re-deriving them against the original spacing is not possible from the change alone.
- * Since folding already treats any whitespace run as one space, no difference is lost
- * that the diff would have reported.
+ * <p>Tokens are re-joined with single spaces, which is the tokenisation the diff engine
+ * compared on -- the indices are positions in it, and re-deriving them against the
+ * original spacing is not possible from the change alone. Folding already treats any
+ * whitespace run as one space, so nothing the diff would have reported is lost.
  */
 public final class WordMarkup {
 
@@ -73,9 +63,9 @@ public final class WordMarkup {
     }
 
     /**
-     * Clamped rather than trusted. The engine's indices are always in range for the
-     * text they came from, but a page that answered a bad index with a 500 would be
-     * harder to diagnose than one that renders the text unmarked.
+     * Clamped rather than trusted: the engine's indices are always in range, but a page
+     * that answered a bad index with a 500 would be harder to diagnose than one that
+     * renders the text unmarked.
      */
     private static void mark(boolean[] marked, int start, int length) {
         int from = (int) Math.clamp(start, 0, marked.length);

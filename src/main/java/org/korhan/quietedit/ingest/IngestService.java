@@ -36,96 +36,25 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * The whole path from outside to inside, in one synchronous call: sync the feed
- * catalogue, poll every feed, parse what came back, follow every article link,
- * strip the boilerplate, and resolve each article to the document it belongs to.
+ * One synchronous run: sync the feed catalogue, poll every feed, follow every article
+ * link, strip the boilerplate, and hand each article to {@link VersionStore}, which alone
+ * decides whether an observation becomes a revision.
  *
- * <p>The one entry point on purpose. The scheduler and the REST endpoint both call
- * {@link #runOnce()} and neither holds a decision of its own, which is what makes a
- * full run testable without a scheduler and triggerable by hand in production.
+ * <p>Every stage turns its expected failures into results rather than exceptions and is
+ * additionally wrapped here, so a publisher serving a 500 or a body that is not a feed
+ * costs one feed or one article, never the run.
  *
- * <p>Versioning is delegated, not decided here: every extracted article is handed
- * to {@link VersionStore}, which owns the rule about when an observation becomes a
- * revision. A run only reports the verdict it gets back, which is what keeps
- * "has this text moved" a single answer with a single implementation.
+ * <p>Not {@code @Transactional}: a run spends nearly all its wall clock on remote
+ * servers, so writes happen in short transactions per feed row and per document.
  *
- * <p>The feed's publication date is normalised here, at the moment the version is
- * written, and against that version's own {@code fetchedAt}. Doing it earlier -- at
- * planning time, against the run's start -- would measure "is this date in the
- * future" against a clock reading that no row records, so a discarded date would be
- * replaced by a timestamp appearing nowhere in the history.
+ * <p>Two concurrent runs would fetch the same articles and race on the unique
+ * constraint of {@code document.canonical_url}, so a second run is refused rather than
+ * queued; the guard is this process's, and a second instance would need a database lock.
  *
- * <p>The feed's {@code updated} date reaches nothing that a version records. It is
- * read at planning time and handed to {@link RecheckPolicy} alone, where it means
- * "worth another look"; what actually changed is still decided by comparing fetched
- * text against the newest stored revision, never by a publisher's claim. The two
- * dates are therefore normalised at different moments against different reference
- * times, which is correct: one is evidence about an article, the other is a hint
- * about when to fetch it.
- *
- * <p>A run is also where those hints are scored. Whenever a claim was standing over
- * an article at planning time, whatever the article was fetched <em>for</em>, the
- * verdict the version store reaches about its text is evidence about the feed that
- * made the claim, and it is handed to {@link UpdatedClaimLog}. That is the only place
- * the two halves meet -- the claim is known before the fetch, the verdict only after
- * it -- so it has to happen here rather than in the policy, which may not remember
- * anything.
- *
- * <p>A run has two sources of candidates. Every feed's links are one; the documents
- * {@link RecheckPolicy} still wants to watch are the other, and they are needed
- * because a feed drops an article after a day or so while the edits worth catching go
- * on for longer. Both sources meet the same two gates in the same order: the policy
- * decides <em>whether it is time</em> for each candidate, and {@link ArticleBudget}
- * then decides <em>how many</em> fit into this run and in which order. A stored
- * document a feed still advertises is offered once, by the feed, so that the entry's
- * dates and title are not thrown away.
- *
- * <p>Both sources key a candidate by the page they will ask for, not by the document's
- * identity, and that is what makes "offered once" hold. The two are the same string
- * for an article that declares itself canonical and two different publishers' URLs for
- * a syndicated copy, so keying the store's half by identity let one document arrive as
- * two candidates fetching two pages -- and since the two publishers' renderings differ,
- * every run then appended a revision reporting an edit nobody made.
- *
- * <p>The {@link EncodingVerdict} travels with the article all the way into that
- * store. This is the only stage that knows how the bytes were decoded, so dropping
- * it here would mean reconstructing at classification time a fact that was certain
- * at fetch time.
- *
- * <p>Failure isolation is the load-bearing property. Every stage turns its expected
- * failures into results rather than exceptions, and each stage is additionally
- * wrapped here, so one publisher serving a 500, a body that is not a feed, an
- * article behind a paywall or an outright defect costs exactly that one feed or that
- * one article -- never the run.
- *
- * <p>Not {@code @Transactional}: a run spends nearly all of its wall clock waiting
- * on remote servers, and a transaction spanning it would pin a connection for the
- * whole poll. Writes happen in short transactions per feed row and per document.
- *
- * <p>One run at a time. The scheduler cannot overlap itself, but {@code POST
- * /api/ingest/run} can fire into a scheduled run and two operators can trigger it
- * together; both runs would then fetch the same articles and race each other on the
- * unique constraint of {@code document.canonical_url}, which the loser would report
- * as a failed article rather than as the duplicate it is. A second attempt is
- * therefore refused outright rather than queued: a queued run would only repeat
- * work that the run in flight is already doing. The guard is one process's -- a
- * second instance of the application would need a lock in the database, which is a
- * decision for the day this is deployed more than once.
- *
- * <p>A run is also bounded: {@link ArticleBudget} caps how many articles it may
- * fetch and decides which candidates get that budget. Everything above the cap is
- * reported as {@link ArticleIngestOutcome#DEFERRED} and picked up by the next run.
- * Every attempt is written back to {@link ArticleAttemptLog}, which is what lets the
- * budget rank by "last tried" rather than by "last succeeded" and eventually stop
- * offering a link that never works.
- *
- * <p>Articles are fetched on virtual threads, and the fan-out covers <em>all</em>
- * feeds' links at once rather than one feed at a time: {@link HostRateLimiter}
- * already serialises per host, so a wide fan-out only ever parallelises across
- * distinct hosts, and going feed by feed would idle every other publisher while one
- * host works through its own queue. Documents are then registered serially in the
- * calling thread, which -- together with link de-duplication -- means two threads
- * can never race to create the same document.
+ * <p>Fetches fan out across all feeds' links at once rather than feed by feed, because
+ * {@link HostRateLimiter} already serialises per host and going in feed order would
+ * idle every other publisher; documents are then registered serially, so two threads
+ * cannot race to create one.
  */
 @Service
 public class IngestService {
@@ -147,7 +76,7 @@ public class IngestService {
     private final RecheckPolicy recheck;
     private final int maxRecheckCandidates;
 
-    /** False between runs. The single permit that keeps two runs from overlapping. */
+    /** The single permit that keeps two runs from overlapping. */
     private final AtomicBoolean running = new AtomicBoolean();
 
     public IngestService(FeedFetchService feedFetchService, FeedParser feedParser,
@@ -172,9 +101,6 @@ public class IngestService {
         this.maxRecheckCandidates = recheckProperties.maxCandidatesPerRun();
     }
 
-    /**
-     * @throws IngestAlreadyRunningException if a run is already in flight
-     */
     public IngestRun runOnce() {
         if (!running.compareAndSet(false, true)) {
             throw new IngestAlreadyRunningException();
@@ -239,19 +165,13 @@ public class IngestService {
     }
 
     /**
-     * Offers the documents the re-check policy could still want, minus the ones a feed
-     * is offering anyway, and records their state in {@code known} so that the policy
-     * sees one entry per candidate.
+     * A publisher's feed carries roughly a day of articles while the observation window
+     * is measured in days, so without reading the store back the re-check curve would
+     * stop being applied where a feed drops an entry.
      *
-     * <p>This is the half of the policy a feed cannot provide. A publisher's feed
-     * carries roughly a day of articles, and the observation window is measured in
-     * days, so without reading the store back the curve would simply stop being
-     * applied at the point where a feed drops an entry -- which is well before the
-     * point where this system stops caring about it.
-     *
-     * <p>The store is queried with the widest bounds any candidate could pass and the
-     * per-document decision is left to the policy: a query that tried to encode the
-     * curve would be a second implementation of it, in SQL, against the same numbers.
+     * <p>The query uses the widest bounds any candidate could pass and leaves the
+     * per-document decision to the policy: encoding the curve in SQL would be a second
+     * implementation of it.
      */
     private RecheckWork offerStoredDocuments(Instant now, Map<String, DocumentObservation> known) {
         RecheckWork work = new RecheckWork();
@@ -263,12 +183,7 @@ public class IngestService {
                     maxRecheckCandidates);
         }
         for (DocumentObservation observation : stored) {
-            // A document a feed still advertises is already a candidate, and that
-            // candidate is the better one: it carries the entry's dates and title.
-            // Keyed by the page the text came from rather than by identity, because
-            // that is the string a feed candidate's provisional identity can equal --
-            // under syndication the two are different publishers' URLs, and keying by
-            // identity here let the same document be fetched from both in one run.
+            // Keyed by the page, not the document: syndication gives one document two URLs.
             if (known.putIfAbsent(observation.fetchUrl(), observation) == null) {
                 work.offer(observation);
             }
@@ -277,13 +192,9 @@ public class IngestService {
     }
 
     /**
-     * Applies the re-check policy, deciding every candidate whose turn it is not.
-     *
-     * <p>Runs before {@link #admit}, and the order matters: the policy answers
-     * "should anyone fetch this now", the budget answers "can this run afford to". A
-     * budget applied first would spend its ceiling ranking candidates that were not
-     * due, and would report them as deferred -- which claims the next run will reach
-     * them, when what is true is that nothing needs to.
+     * Runs before {@link #admit}: a budget applied first would spend its ceiling ranking
+     * candidates that were not due and report them as deferred, claiming the next run
+     * will reach them when nothing needs to.
      */
     private Planned due(Instant now, List<Candidate> candidates,
                         Map<String, DocumentObservation> known) {
@@ -333,10 +244,9 @@ public class IngestService {
     }
 
     /**
-     * Adds what one fetch found to its feed's tally, but only for the outcomes that
-     * settle whether the text moved. A skipped, failed or newly registered article
-     * tests nothing about the claim that stood over it, and counting it either way
-     * would make a publisher's credibility depend on their paywall.
+     * Only the outcomes that settle whether the text moved are counted: a skipped,
+     * failed or newly registered article tests nothing about the claim that stood over
+     * it, and counting it would make a publisher's credibility depend on their paywall.
      */
     private static void score(Map<UUID, UpdatedClaimTally> evidence, Candidate candidate,
                               ArticleIngestResult result) {
@@ -350,11 +260,8 @@ public class IngestService {
     }
 
     /**
-     * Writes back what this run learned about each feed's {@code updated} dates.
-     *
-     * <p>Contained per feed like every other write a run makes: a strike that cannot
-     * be recorded costs one run's worth of evidence about one publisher, and the rule
-     * is a running count precisely so that a lost increment is survivable.
+     * Contained per feed: the rule is a running count precisely so that a lost
+     * increment is survivable.
      */
     private void recordUpdatedClaims(Map<UUID, UpdatedClaimTally> evidence) {
         evidence.forEach((feedId, tally) -> {
@@ -369,13 +276,10 @@ public class IngestService {
     }
 
     /**
-     * One candidate's state, as the policy is allowed to see it.
-     *
-     * <p>The feed's {@code updated} date is normalised here and handed over whole,
-     * exactness flag included. Whether an inexact claim is worth acting on is the
-     * policy's decision, and it is spelled out there; normalising against the run's
-     * start is this method's, because the question is asked before anything is fetched
-     * and there is no later timestamp to measure against yet.
+     * The feed's {@code updated} date is normalised against the run's start, because the
+     * question is asked before anything is fetched and there is no later timestamp yet.
+     * It is handed over whole, exactness flag included: whether an inexact claim is
+     * worth acting on is the policy's decision.
      */
     private RecheckState stateOf(Instant now, Candidate candidate,
                                  Map<String, DocumentObservation> known, Map<UUID, Integer> claims) {
@@ -391,12 +295,10 @@ public class IngestService {
     }
 
     /**
-     * The bucket a candidate's requests are counted in.
-     *
-     * <p>A URL with no readable host becomes its own bucket rather than being dropped
-     * or lumped in with the others. It gets a whole host's ceiling to itself, which
-     * costs nothing: {@link ArticleFetcher} refuses a URL without a host anyway, so the
-     * one request the bucket permits is the one that reports it broken.
+     * A URL with no readable host becomes its own rate-limit bucket rather than being
+     * dropped or lumped in with the others, which costs nothing: {@link ArticleFetcher}
+     * refuses such a URL anyway, so the one request the bucket permits is the one that
+     * reports it broken.
      */
     private static String hostOf(String url) {
         try {
@@ -411,13 +313,9 @@ public class IngestService {
     }
 
     /**
-     * Applies the run's ceiling and its give-up rule, deciding every candidate the
-     * run will not fetch.
-     *
-     * <p>The attempt log is consulted even when the run fits inside its ceiling.
-     * Ranking would indeed be pointless then, but abandonment is not: a catalogue
-     * small enough to fit would otherwise re-fetch a permanently broken link on every
-     * single poll, which is the cost this rule exists to stop.
+     * The attempt log is consulted even when the run fits inside its ceiling: ranking is
+     * pointless then, but abandonment is not, or a small catalogue would re-fetch a
+     * permanently broken link on every poll.
      */
     private List<Candidate> admit(List<Candidate> candidates) {
         if (candidates.isEmpty()) {
@@ -453,16 +351,9 @@ public class IngestService {
     }
 
     /**
-     * Writes back that this link was tried and whether the try produced a document,
-     * which is what moves it out of the front of the next run's queue and, after
-     * enough consecutive failures, out of the candidate set entirely.
-     *
-     * <p>A document id is the success test rather than the outcome enum: it is the
-     * one thing that means "this link resolved to an article", however the run chose
-     * to label it.
-     *
-     * <p>Contained like every other per-article step. A log that cannot be written is
-     * a lost strike, not a lost article.
+     * A document id is the success test rather than the outcome enum: it is the one
+     * thing that means "this link resolved to an article", however the run labelled it.
+     * A log that cannot be written is a lost strike, not a lost article.
      */
     private void recordAttempt(Candidate candidate, ArticleIngestResult result) {
         try {
@@ -473,18 +364,14 @@ public class IngestService {
     }
 
     /**
-     * The identity a link would have if it resolved without redirects and without a
-     * {@code rel=canonical} of its own. Good enough to rank by -- a link whose real
-     * identity differs is at worst ranked as unseen, which only costs it a place at
-     * the front of the queue -- and it is the only identity available before the
-     * fetch, which is the whole point of ranking here.
+     * The identity a link would have without redirects and without a
+     * {@code rel=canonical} of its own -- the only one available before the fetch, and
+     * good enough to rank by, since a link whose real identity differs is at worst
+     * ranked as unseen.
      *
-     * <p>A link that cannot be canonicalised at all falls back to the raw link as its
-     * own identity rather than staying unidentified. It is still fetched, so that the
-     * fetch stage is the one that reports it broken, but it now accumulates strikes
-     * like any other failing link -- an untracked link would rank as never-tried
-     * forever and starve the catalogue behind it, which is precisely the failure this
-     * whole mechanism exists to prevent.
+     * <p>An uncanonicalisable link falls back to the raw link so that it still
+     * accumulates strikes; left unidentified it would rank as never-tried forever and
+     * starve the catalogue behind it.
      */
     private String provisionalIdentity(String link) {
         try {
@@ -494,20 +381,14 @@ public class IngestService {
         }
     }
 
-    /**
-     * Parses one feed body into the links a run will follow. A 304 or a failed fetch
-     * carries no body and is not an error at this stage -- it simply contributes no
-     * entries.
-     */
+    /** A 304 or a failed fetch carries no body; that is not an error here, just no entries. */
     private FeedWork plan(FeedFetchResult fetch, Set<String> seenLinks) {
         if (fetch.outcome() != FeedFetchOutcome.FETCHED) {
             return FeedWork.withoutEntries(fetch, fetch.failureReason());
         }
         FeedParseResult parse;
         try {
-            // A feed's verdict is logged and dropped on purpose: nothing versions a feed
-            // body, so there is no row to record it on. The article verdict is the one
-            // that has to survive, and it is resolved separately in read().
+            // The feed's verdict is dropped: nothing versions a feed body, so there is no row.
             String body = EncodingResolver.resolve(fetch.body(), fetch.contentType(), fetch.url()).text();
             parse = feedParser.parse(fetch.url(), body);
         } catch (RuntimeException e) {
@@ -564,9 +445,8 @@ public class IngestService {
     }
 
     /**
-     * The HTML is read back from the store rather than carried through the fetch
-     * result: a run has hundreds of articles in flight, and only the one being
-     * extracted belongs in memory.
+     * The HTML is read back from the store rather than carried through the fetch result:
+     * a run has hundreds of articles in flight and only one belongs in memory.
      */
     private Attempt read(Candidate candidate, ArticleFetchResult fetch) {
         EncodingResolver.Decoded decoded;
@@ -594,14 +474,10 @@ public class IngestService {
     }
 
     /**
-     * The only stage that writes documents and versions, and it runs single-threaded.
-     *
-     * <p>Two transactions, not one: identity is established first, then the
-     * observation is offered to the version store. Splitting them means a version
-     * write that fails leaves the document registered and its {@code lastCheckedAt}
-     * updated, so the next run re-checks the article normally instead of the failure
-     * also erasing the record that anyone looked. The reverse -- a version without a
-     * document -- cannot happen, because the store needs the document id to write one.
+     * Two transactions, not one: a failed version write still leaves the document
+     * registered and its {@code lastCheckedAt} updated, so the next run re-checks
+     * normally instead of the failure also erasing the record that anyone looked. The
+     * reverse cannot happen, because the store needs the document id.
      */
     private ArticleIngestResult resolve(Attempt attempt) {
         if (attempt.decided() != null) {
@@ -640,30 +516,21 @@ public class IngestService {
                 attempt.content().paragraphs().size(), attempt.encoding());
     }
 
-    /**
-     * A fetched article always carries a status; the {@code Integer} on the fetch
-     * result is nullable only for the outcomes that never reached this far.
-     */
+    /** Nullable only for the fetch outcomes that never reach this far. */
     private static int statusOf(ArticleFetchResult fetch) {
         return fetch.httpStatus() == null ? 0 : fetch.httpStatus();
     }
 
     /**
-     * Where a candidate's result goes. Two things produce candidates -- a feed's
-     * entries and the store's due documents -- and both need their results back in
-     * their own order, so a candidate carries its sink rather than the run branching
-     * on where it came from.
-     *
-     * <p>Written from the calling thread only. The fan-out stage touches no result.
+     * Both candidate sources need their results back in their own order, so a candidate
+     * carries its sink rather than the run branching on where it came from. Written from
+     * the calling thread only.
      */
     private interface ResultSink {
         void accept(int slot, ArticleIngestResult result);
     }
 
-    /**
-     * One feed's slot table. Every parsed entry keeps its position, so a run's report
-     * lists articles in feed order however the concurrent fetches happened to finish.
-     */
+    /** Slot table: entries keep their feed position however the concurrent fetches finish. */
     private static final class FeedWork implements ResultSink {
 
         private final FeedFetchResult fetch;
@@ -689,12 +556,9 @@ public class IngestService {
         }
 
         /**
-         * A link advertised twice -- by two feeds of one publisher, or twice within
-         * one feed -- is fetched once; {@code seenLinks} is therefore the whole
-         * run's, not this feed's. Without that, the duplicate would be fetched a
-         * second time only to be recognised as the same document, and the second
-         * fetch would additionally race the first for its creation. Which feed wins
-         * a shared link is decided by feed order, which is itself stable.
+         * {@code seenLinks} is the whole run's, not this feed's: a link two feeds
+         * advertise would otherwise be fetched twice and the second fetch would race the
+         * first for the document's creation. Feed order decides which feed wins it.
          */
         static FeedWork parsed(FeedFetchResult fetch, FeedParseResult parse, Set<String> seenLinks,
                                UnaryOperator<String> identity) {
@@ -722,14 +586,9 @@ public class IngestService {
     }
 
     /**
-     * The documents the re-check policy wants looked at that no feed advertises any
-     * more. Its own slot table for the same reason a feed has one: a result belongs at
-     * the position its candidate had, whatever order the fetches finished in.
-     *
-     * <p>These candidates carry no title and no dates, because no feed said anything
-     * about them this run. That is not a loss of information: a feed that has dropped
-     * an entry has no current claim about it, and inventing one from the entry it used
-     * to carry would put a stale claim on a fresh version row.
+     * The due documents no feed advertises any more. They carry no title and no dates:
+     * a feed that dropped an entry has no current claim about it, and reusing the entry
+     * it used to carry would put a stale claim on a fresh version row.
      */
     private static final class RecheckWork implements ResultSink {
 
@@ -737,19 +596,9 @@ public class IngestService {
         private final List<ArticleIngestResult> articles = new ArrayList<>();
 
         /**
-         * The document's observed origin serves as link and identity at once, and it is
-         * already canonicalised, so unlike a feed link it needs no provisional
-         * resolution.
-         *
-         * <p>The origin and not the canonical URL, which is the fix for
-         * quietedit-cca.9: a syndicated copy is filed under the original publisher's
-         * canonical URL, so re-checking that URL fetched a page whose text this
-         * document had never carried, reported a change nobody made, and reported the
-         * opposite change on the next run. The re-check has to ask for the page the
-         * text was read from.
-         *
-         * <p>It is also the identity the attempt log keys by, which is what makes the
-         * two candidate sources collide in one run instead of passing each other.
+         * The observed origin, not the canonical URL: a syndicated copy is filed under
+         * the original publisher's canonical URL, so re-checking that URL fetches a page
+         * whose text this document never carried and reports an edit nobody made.
          */
         void offer(DocumentObservation observation) {
             articles.add(null);
@@ -768,45 +617,25 @@ public class IngestService {
     }
 
     /**
-     * @param sink         where this candidate's result belongs, and at which slot
-     * @param identity     what the budget, the attempt log and the re-check policy key
-     *                     this link by, resolved before the fetch because all three
-     *                     decide before the fetch
-     * @param feedTitle    the headline as the feed advertised it, kept beside the one the
-     *                     page carries: a feed and a page that disagree about a headline
-     *                     is itself a signal, and only the version can record it
-     * @param publishedRaw the feed's publication date, still as the publisher wrote it.
-     *                     It is normalised in {@link #resolve}, not here, so that the
-     *                     retrieval time it is measured against is the very timestamp the
-     *                     version is written with rather than a slightly earlier one
-     * @param updatedRaw   the feed's {@code updated} date, verbatim. Normalised in
-     *                     {@link #stateOf} against the run's start, because it is read
-     *                     to decide whether to fetch at all and so has to be answered
-     *                     before anything is fetched. It reaches no version row.
+     * @param publishedRaw verbatim; normalised in {@link #resolve} so that it is measured
+     *                     against the very timestamp its version is written with
+     * @param updatedRaw   verbatim; normalised in {@link #stateOf} against the run's
+     *                     start, and reaches no version row
      */
     private record Candidate(ResultSink sink, int slot, UUID feedId, String link, String identity,
                              String feedTitle, String publishedRaw, String updatedRaw) {
     }
 
     /**
-     * What the re-check policy left for the run to do, plus the one thing about the
-     * planning step the fetch stage still needs afterwards.
-     *
-     * @param candidates          the candidates the policy said yes to, in their own order
-     * @param underAStandingClaim the identities whose feed claimed an edit since the
-     *                            last look, whether or not that claim is why they are
-     *                            in {@code candidates}. Kept because the claim is only
-     *                            knowable before the fetch and its verdict only after,
-     *                            and {@link UpdatedClaimTally} needs both
+     * @param underAStandingClaim the identities whose feed claimed an edit since the last
+     *                            look, whether or not that is why they are due. Carried
+     *                            because {@link UpdatedClaimTally} needs the claim, known
+     *                            only before the fetch, and the verdict, known only after
      */
     private record Planned(List<Candidate> candidates, Set<String> underAStandingClaim) {
     }
 
-    /**
-     * One article after the network stage. Either {@code decided} is set -- the
-     * article needs no document -- or the content, canonical URL and encoding verdict
-     * are.
-     */
+    /** Either {@code decided} is set, or the content, canonical URL and verdict are. */
     private record Attempt(Candidate candidate, ArticleFetchResult fetch, String canonicalUrl,
                            ArticleContent content, EncodingVerdict encoding, ArticleIngestResult decided) {
 

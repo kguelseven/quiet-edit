@@ -16,21 +16,17 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Fetches, caches and applies robots.txt per origin.
  *
- * <p>The cache is what makes this affordable: one robots.txt per origin per TTL,
- * not one per article. It is keyed by origin (scheme, host, port) because that is
- * the scope robots.txt has -- {@code news.example.com} and {@code example.com} are
- * separate files, and so are http and https.
+ * <p>The cache is what makes this affordable: one robots.txt per origin per TTL, keyed by
+ * origin because that is the scope robots.txt has -- {@code news.example.com} and
+ * {@code example.com} are separate files, and so are http and https.
  *
- * <p>Status handling follows RFC 9309: a 2xx is parsed, a 4xx means "no rules,
- * crawl freely" (a 404 is the normal case for sites without a robots.txt, and a 401
- * or 403 on robots.txt is not a statement about articles), and anything else --
- * 5xx, a transport failure, a redirect chain that does not resolve -- means the file
- * exists but could not be read, which is a full disallow. That last case is cached
- * only briefly, so a flaky robots endpoint costs us minutes rather than an hour.
+ * <p>Status handling follows RFC 9309: 2xx is parsed, 4xx means "no rules" (a 404 is
+ * normal, and a 403 on robots.txt is not a statement about articles), and anything else
+ * means the file exists but could not be read, which is a full disallow -- cached only
+ * briefly, so a flaky robots endpoint costs minutes rather than an hour.
  *
- * <p>The robots.txt request itself is not gated by robots.txt (that would not
- * terminate) but it does go through the per-host rate limiter, so a run cannot
- * bypass politeness by asking for many origins at once.
+ * <p>The robots.txt request is not gated by robots.txt, which would not terminate, but it
+ * does go through the per-host rate limiter.
  */
 @Component
 public class RobotsPolicy {
@@ -54,11 +50,8 @@ public class RobotsPolicy {
     }
 
     /**
-     * The rules in force for {@code uri}'s origin, from cache when still fresh.
-     *
-     * <p>Not synchronised across origins: two threads racing on the same cold origin
-     * may both fetch robots.txt once. Locking that away would serialise unrelated
-     * hosts, and the duplicate cost is one small request.
+     * Not synchronised across origins: two threads racing on the same cold origin may both
+     * fetch robots.txt once, and locking that away would serialise unrelated hosts.
      */
     public RobotsRules rulesFor(URI uri) {
         String origin = origin(uri);
@@ -109,8 +102,7 @@ public class RobotsPolicy {
         PoliteHttpFetcher.Response response = trace.response();
         int status = response.statusCode();
         if (status >= 200 && status < 300) {
-            // robots.txt is defined as UTF-8; a stray non-UTF-8 byte must not cost us
-            // the whole file, so it decodes leniently rather than throwing.
+            // robots.txt is defined as UTF-8; one stray byte must not cost the whole file.
             String body = new String(response.body(), StandardCharsets.UTF_8);
             return new Fetched(RobotsRules.parse(body, agentToken), articleProperties.robotsCacheTtl());
         }
@@ -133,9 +125,8 @@ public class RobotsPolicy {
     }
 
     /**
-     * {@code quietedit/0.1 (+https://...)} names the product {@code quietedit}, and
-     * that token -- not the whole header -- is what a robots.txt group is written
-     * against.
+     * A robots.txt group is written against the product token {@code quietedit}, not
+     * against the whole header.
      */
     private static String productToken(String userAgent) {
         String token = userAgent.trim().toLowerCase(Locale.ROOT);

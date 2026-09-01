@@ -125,8 +125,7 @@ class RobotsRulesTest {
 
     @Test
     void anUnparseableFileAllowsEverythingRatherThanNothing() {
-        // A file we cannot make sense of is not a prohibition; a publisher who wants
-        // us out says so in a syntax we do understand.
+        // An unparseable file is not a prohibition: a publisher who wants us out says so readably.
         assertThat(RobotsRules.parse("<html>404 not found</html>", AGENT).allows("/story/1")).isTrue();
         assertThat(RobotsRules.parse("", AGENT).allows("/story/1")).isTrue();
     }

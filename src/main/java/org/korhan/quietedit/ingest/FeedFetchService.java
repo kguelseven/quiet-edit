@@ -14,19 +14,16 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /**
- * The one synchronous entry point for a feed poll. Reachable over REST and callable
- * from a scheduler; it owns the whole run so that neither caller holds logic.
+ * The one synchronous entry point for a feed poll, reachable over REST and callable from
+ * a scheduler, so that neither caller holds logic.
  *
- * <p>Feeds are fetched on virtual threads because a run is almost entirely waiting
- * on remote servers. Per-host serialisation is not lost by that:
- * {@link HostRateLimiter} guards the gate, so the fan-out only ever parallelises
- * across <em>distinct</em> hosts.
+ * <p>Feeds are fetched on virtual threads because a run is almost entirely waiting on
+ * remote servers; {@link HostRateLimiter} guards the gate, so the fan-out only ever
+ * parallelises across distinct hosts.
  *
- * <p>Deliberately not {@code @Transactional}: a run spends seconds in network I/O,
- * and holding a database transaction open across that would pin a connection for
- * the whole poll. Feeds are read first, fetched outside any transaction, and each
- * feed's observed state is then written in its own short transaction -- which also
- * means a failure while writing one feed cannot roll back the others.
+ * <p>Deliberately not {@code @Transactional}: a transaction spanning the network I/O
+ * would pin a connection for the whole poll. Each feed's state is written in its own
+ * short transaction, so a failure while writing one cannot roll back the others.
  */
 @Service
 public class FeedFetchService {
@@ -77,9 +74,8 @@ public class FeedFetchService {
     }
 
     /**
-     * {@code FeedFetcher} already turns every expected failure into a result, so
-     * anything arriving here is a defect. It is still contained per feed: the run
-     * must survive it.
+     * {@code FeedFetcher} already turns every expected failure into a result, so anything
+     * arriving here is a defect -- still contained per feed, because the run must survive it.
      */
     private FeedFetchResult await(Feed feed, Future<FeedFetchResult> future) {
         try {
@@ -95,10 +91,9 @@ public class FeedFetchService {
     }
 
     /**
-     * Retrieval time and status are always written, so a run is visible even when
-     * every feed failed. Validators are only replaced from a 2xx -- a 304 that omits
-     * them must not clear the ones that produced it, or the next request would be
-     * unconditional and pull the whole feed again.
+     * Retrieval time and status are always written, so a run is visible even when every
+     * feed failed. Validators are only replaced from a 2xx: a 304 that omits them must not
+     * clear the ones that produced it, or the next request would pull the whole feed again.
      */
     private void record(Feed feed, FeedFetchResult result) {
         feed.setLastPolledAt(result.fetchedAt());

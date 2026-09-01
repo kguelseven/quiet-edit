@@ -12,26 +12,16 @@ import java.util.UUID;
  * The reading interface: two server-rendered pages over the same services the REST
  * endpoints use.
  *
- * <p>Thymeleaf inside this process, so {@code spring-boot:run} serves the pages with
- * no second build step, no CORS and no separate deployment artifact. The use case is
- * reading -- nothing here posts, and no page needs state that a URL cannot carry.
+ * <p>Thymeleaf inside this process, so {@code spring-boot:run} serves the pages with no
+ * second build step, no CORS and no separate deployment artifact.
  *
- * <h2>Two pages, and why the URLs look like this</h2>
- * <ul>
- *   <li>{@code GET /} -- the documents observed to change, most recent change first,
- *       with the filters as query parameters so a narrowed listing can be linked.</li>
- *   <li>{@code GET /documents/{id}/diff?from=&to=} -- one diff. The index links to it
- *       with both ordinals named, which is what makes the URL stable: the same link
- *       shows the same two revisions after a third one arrives, while the defaults
- *       would silently move to the newest pair.</li>
- * </ul>
- * The ordinals stay optional so that "what changed last" is still reachable by hand,
- * matching the REST endpoint.
+ * <p>The index links to a diff with both ordinals named, which is what makes the URL
+ * stable: the same link shows the same two revisions after a third one arrives, where the
+ * defaults would silently move to the newest pair -- while staying optional, so that
+ * "what changed last" is reachable by hand.
  *
- * <p>Thin on purpose: it binds the query string into a {@link ChangeFilter} and hands
- * the result of {@link ChangeBrowserService} to a template. The filter's own floor on
- * {@code minRevisions} lives in the record, so a hand-written {@code minRevisions=0}
- * cannot widen the listing past what it means.
+ * <p>Thin on purpose. The floor on {@code minRevisions} lives in {@link ChangeFilter}, so
+ * a hand-written {@code minRevisions=0} cannot widen the listing past what it means.
  */
 @Controller
 public class ChangeBrowserController {

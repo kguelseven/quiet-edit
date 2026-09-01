@@ -40,10 +40,7 @@
             <button type="submit">Show</button>
         </form>
 
-        <!-- Outside the form on purpose: these are totals for the whole feed, not part of
-             the filtered result, and they stay put when a filter is applied.
-             Fetch times go through the same renderer as every other timestamp here;
-             the zone it uses is named in the masthead. -->
+        <!-- Outside the form: totals for the whole feed, so they stay put when a filter is applied. -->
         <aside class="coverage">
             <h2>Feeds</h2>
             <ul>
@@ -96,8 +93,7 @@
             <td th:text="${row.host}">host</td>
             <td class="num" th:text="${row.revisions}">0</td>
             <td th:text="${@timestamps.format(row.lastChangedAt)}">never</td>
-            <!-- Paragraph count of the newest revision: a low one is what a paywalled
-                 excerpt or a ticker without entry bodies looks like. -->
+            <!-- A low count is what a paywalled excerpt or a bodyless ticker looks like. -->
             <td class="num" th:text="${row.paragraphs}">0</td>
         </tr>
         </tbody>

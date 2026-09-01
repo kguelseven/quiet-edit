@@ -2,37 +2,26 @@ package org.korhan.quietedit.ingest;
 
 /**
  * What one run learned about one feed's {@code updated} dates: how many articles it
- * fetched while that feed's claim of an edit stood, and how many of those fetches
- * actually found the text somewhere else.
+ * fetched while that feed's claim of an edit stood, and how many of those found the text
+ * somewhere else.
  *
- * <p>The counting rule, stated once so that both halves of it are in the same place:
+ * <p>A fetch counts only if the claim stood at planning time, which is
+ * {@link RecheckPolicy#claimsAnEditSinceTheLastCheck} and nothing else -- a feed that
+ * says nothing about an entry is neither credited nor charged for what the fetch found.
  *
- * <ul>
- *   <li>A fetch counts only if the feed's claim <em>stood at planning time</em> --
- *       exactly normalised and later than the last look, which is
- *       {@link RecheckPolicy#claimsAnEditSinceTheLastCheck} and nothing else. A feed
- *       that says nothing about an entry makes no claim about it and is neither
- *       credited nor charged for what the fetch found.
- *   <li>It counts whether or not the claim is <em>why</em> the article was fetched.
- *       That is the load-bearing part: once a feed's claims stop overriding the
- *       curve, a rule that only counted claim-driven fetches would never see another
- *       one and the feed could never earn its credibility back. The curve keeps
- *       fetching those articles anyway, and every one of those fetches is still a
- *       test of the claim that was standing over it.
- *   <li>Only a verdict about the text counts. A revision confirms the claim, an
- *       unchanged text refutes it, and everything else -- robots.txt, a paywall stub,
- *       a failed request, a first observation -- settles nothing and is not counted
- *       in either direction.
- * </ul>
+ * <p>It counts whether or not the claim is why the article was fetched, and that is the
+ * load-bearing part: once a feed's claims stop overriding the curve, a rule that counted
+ * only claim-driven fetches would never see another one and the feed could never earn its
+ * credibility back.
  *
- * <p>{@link #appliedTo} is the other half: a single confirmation clears the whole
- * strike count. Consecutive misses, like {@link AttemptHistory#failureCount}, because
- * the question is "are this publisher's dates noise <em>now</em>" -- a lifetime ratio
- * would hold a feed's first bad month against it forever, and a feed that fixes its
- * CMS on Tuesday should be believed again on Tuesday.
+ * <p>Only a verdict about the text counts: a paywall stub, a failed request or a first
+ * observation settles nothing and is counted in neither direction.
  *
- * @param fetches   fetches made this run under a standing claim that reached a
- *                  verdict about the text
+ * <p>Consecutive misses rather than a lifetime ratio, like
+ * {@link AttemptHistory#failureCount}, because the question is whether this publisher's
+ * dates are noise <em>now</em>.
+ *
+ * @param fetches   fetches made this run under a standing claim that reached a verdict
  * @param confirmed how many of them appended a revision
  */
 public record UpdatedClaimTally(int fetches, int confirmed) {
@@ -63,18 +52,14 @@ public record UpdatedClaimTally(int fetches, int confirmed) {
     }
 
     /**
-     * The feed's new strike count. One confirmation anywhere in the run clears it: a
-     * feed whose dates lead to real revisions is a feed worth believing, and it does
-     * not matter that the same run also fetched a dozen of its entries that had not
-     * moved -- a publisher who edits one article out of thirty is behaving normally,
-     * not stamping a template.
+     * One confirmation anywhere in the run clears the whole count: a publisher who edits
+     * one article out of thirty is behaving normally, not stamping a template.
      */
     public int appliedTo(int unconfirmedClaims) {
         if (confirmed > 0) {
             return 0;
         }
-        // Saturating: a feed that has been noise for years must not wrap around into
-        // being believed again.
+        // Saturating: years of noise must not wrap around into being believed again.
         return (int) Math.min((long) unconfirmedClaims + fetches, Integer.MAX_VALUE);
     }
 }

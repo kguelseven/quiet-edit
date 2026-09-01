@@ -16,118 +16,28 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
- * Computes the structured difference between two versions of a document: which
- * paragraphs were added, removed, edited or displaced, and which words moved inside
- * the edited ones.
+ * The structured difference between two versions: which paragraphs were added, removed,
+ * edited or displaced, and which words moved inside the edited ones. It makes no
+ * judgement -- the result is evidence for the classifier, not a verdict of its own.
  *
- * <h2>What it does not do</h2>
- * It makes no judgement. Nothing here decides whether an edit is cosmetic, a
- * correction or a rewrite, and nothing here reads the encoding verdicts; the result
- * is evidence for the classifier, not a verdict of its own.
+ * <p>Paragraphs and words are compared on their folded form, the same folding
+ * {@link ContentHasher} hashes, so that a CMS switching on smart quotes is not an edit;
+ * the result always carries the original text, because the reader must see what the
+ * publisher wrote.
  *
- * <h2>Comparison basis</h2>
- * Paragraphs and words are compared on their folded form -- the same folding
- * {@link ContentHasher} hashes -- so that a CMS switching on smart quotes or a
- * publisher re-wrapping a line does not surface as an edit. What the result carries
- * is always the original text, because the reader must see what the publisher wrote.
- * Paragraphs that fold away to nothing (a block that was only an ad identifier) take
- * no part in the diff, matching the hasher's view of what a paragraph is; the indices
- * they occupy in the stored list are still the indices reported for their neighbours.
+ * <p>Moves are paired before edits, so a paragraph that merely travelled is never spent
+ * on a similarity match with something else.
  *
- * <p>One seam is deliberate: paragraph identity folds the whole paragraph, while word
- * identity folds each whitespace-separated token on its own. A masked span covering
- * several words ("vor drei Stunden") therefore does not fold at word level, so it can
- * appear as a word change inside a paragraph that was edited for another reason. It
- * cannot produce a diff by itself, because such a pair never becomes two versions.
- * Sharing one folding implementation across extractor, hasher and diff engine is
- * tracked separately.
- *
- * <h2>How pairs are found</h2>
- * A Myers diff over the folded paragraph lists yields the runs that differ. Every
- * paragraph in those runs is a candidate on one side or the other, and the candidates
- * are then paired in two passes:
- * <ol>
- *   <li><b>Identical text, different position</b> -- a {@link ParagraphChange.Moved}.
- *       Run first, so a paragraph that merely travelled is never spent on a
- *       similarity match with something else.</li>
- *   <li><b>Similar text</b> -- a {@link ParagraphChange.Changed}, carrying the
- *       word-level detail. Each unmatched removal takes the best remaining
- *       counterpart that clears the overlap bar for that pair, which is lower when
- *       the two sit in the same slot of a balanced replacement.</li>
- * </ol>
- * What is left over is an outright removal or addition.
- *
- * <h2>Thresholds, and why these values</h2>
- * Two paragraphs are paired as an edit at a word overlap of
- * {@value #MIN_SIMILARITY} or more, measured as {@code 2 * unchanged words /
- * (words before + words after)} -- the share of the pair that survived. Half is the
- * point where the word diff still reads as an edit of one sentence rather than as an
- * alignment of two unrelated ones: below it the surviving overlap is mostly
- * function words, and the resulting entry claims a lineage between paragraphs that
- * have none. The failure it accepts is the cheaper one -- a heavily rewritten
- * paragraph is reported as a removal plus an addition, which is true, just less
- * specific -- while the failure it avoids, a bogus pairing, hands the classifier a
- * fabricated edit.
- *
- * <p>A pair that was replaced <em>in its own slot</em> needs only
- * {@value #MIN_IN_SLOT_SIMILARITY} of its words to survive, because there the word
- * overlap is no longer the only evidence. A balanced replacement -- a run of n
- * blocks replaced by n blocks, with the paragraphs on both sides of the run
- * identical -- carries a positional correspondence of its own: the i-th block of
- * the old run occupies the slot the i-th block of the new run now holds. Word
- * overlap then only has to rule out the case that the slot was refilled with
- * something else entirely, which is what a wholesale replacement looks like: no
- * shared words at all.
- *
- * <p>The value comes from the observed pairs, not from first principles. The edit
- * this system was built to catch -- 20min.ch correcting the subheading "Über 2000
- * Gemeinden sind attraktiv" to "Zwei Drittel aller Gemeinden sind gut" four minutes
- * after publication -- survives at 0.36, because a six-word subheading rewritten to
- * make a different claim keeps almost nothing while still plainly being the same
- * subheading. That is the general problem with short blocks: at five words one
- * changed word already costs 0.2, so the half-share bar that fits a paragraph
- * effectively forbids pairing a heading at all, and this engine cannot tell a
- * heading from a paragraph -- {@link ArticleContent} carries no block kinds. Below
- * a third, the observed non-pairs sit at 0.25 and lower. The margin between the two
- * is thin and is named as a weakness below.
- *
- * <h2>Known weaknesses</h2>
- * <ul>
- *   <li>Two paragraphs with identical text (a repeated disclaimer, a stock sentence)
- *       are interchangeable to the move pass, which takes them in order. When one of
- *       several copies is deleted, the move it reports may name a different copy than
- *       the editor touched. The set of paragraphs is right either way.</li>
- *   <li>A paragraph that was split in two, or two that were merged into one, is not
- *       recognised as such: the halves match the whole only if one of them clears the
- *       similarity bar, and the rest is reported as an addition or a removal.</li>
- *   <li>The lower in-slot bar is calibrated, not derived, and the gap it sits in is
- *       narrow: 0.36 for the correction it exists to catch, 0.25 for the closest
- *       observed non-pair. Two unrelated short blocks that replace each other in
- *       place and happen to share a third of their words -- two subheadings both
- *       ending "sind gut" -- are paired as an edit. The claim is still bounded by
- *       the slot: it says the block in that position was rewritten, which is true
- *       of the position even when the two texts have nothing to do with each
- *       other.</li>
- *   <li>Pairing is greedy in reading order, not globally optimal. A later removal
- *       could in principle have been a better counterpart for an addition already
- *       taken. Global assignment would cost determinism-by-inspection for a gain that
- *       only shows on wholesale reshuffles, which are not the edits this system looks
- *       for.</li>
- * </ul>
- *
- * <h2>Determinism</h2>
- * A pure function of the two texts: no clock, no randomness, no locale-dependent
- * comparison, and every pass iterates in a fixed order with ties resolved by the
- * lowest index. The result list is sorted by position in the later version, so the
- * same pair of versions always yields the same diff, and the diff of A to B is not
- * the diff of B to A.
+ * <p>Pairing is greedy in reading order with ties resolved to the lowest index, which is
+ * what makes the diff a pure function of the two texts; the similarity bars, their
+ * calibration and the known weaknesses are justified in quietedit-1hs.
  */
 @Service
 public class DiffEngine {
 
     static final double MIN_SIMILARITY = 0.5;
 
-    /** The bar for a pair that replaced each other in place; see the class comment. */
+    /** The bar for a pair that replaced each other in place; calibrated in quietedit-1hs. */
     static final double MIN_IN_SLOT_SIMILARITY = 1.0 / 3;
 
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
@@ -144,10 +54,7 @@ public class DiffEngine {
         this.folding = folding;
     }
 
-    /**
-     * @param from the earlier version, {@code to} the later one -- the order decides
-     *             which side of the diff is an addition and which a removal
-     */
+    /** The order decides which side of the diff is an addition and which a removal. */
     public DocumentDiff diff(DocumentVersion from, DocumentVersion to) {
         Objects.requireNonNull(from, "from");
         Objects.requireNonNull(to, "to");
@@ -163,10 +70,8 @@ public class DiffEngine {
     }
 
     /**
-     * The page's own headline, not the feed's: the feed title is what a syndication
-     * entry claimed at discovery time and is not re-observed on a re-fetch, so
-     * comparing it across versions would report the publisher's title edits as nothing
-     * at all.
+     * The page's own headline, not the feed's: a feed title is claimed at discovery and
+     * not re-observed on a re-fetch, so comparing it would report no title edits at all.
      */
     private static ArticleContent contentOf(DocumentVersion version) {
         return new ArticleContent(version.getPageTitle(), version.getParagraphs());
@@ -228,8 +133,7 @@ public class DiffEngine {
                 addedTaken[a] = true;
                 Block before = removed.get(r).block();
                 Block after = added.get(a).block();
-                // The later spelling: the two fold alike, so any difference between
-                // them is typography, and the current page is what a reader sees.
+                // The later spelling: the two fold alike, so any difference is typography.
                 changes.add(new Ranked(added.get(a).targetPosition(), removed.get(r).sourcePosition(),
                         RANK_MOVED, new ParagraphChange.Moved(before.index(), after.index(), after.text())));
                 break;
@@ -251,9 +155,6 @@ public class DiffEngine {
                     continue;
                 }
                 // Strictly greater, so equally good candidates resolve to the earliest.
-                // The bar is per pair, not per removal, so a weaker candidate in the
-                // removal's own slot can win over a stronger one that fails the higher
-                // cross-slot bar.
                 double similarity = similarity(before, words(added.get(a).block().text()));
                 if (similarity > bestSimilarity && similarity >= minSimilarity(removed.get(r), added.get(a))) {
                     bestSimilarity = similarity;
@@ -292,19 +193,17 @@ public class DiffEngine {
     }
 
     /**
-     * How much of the pair has to survive for it to be called an edit. Lower for two
-     * blocks that replaced each other in place, where the position is evidence of its
-     * own; see the class comment for the reasoning and the calibration.
+     * Lower for two blocks that replaced each other in place, where the position is
+     * evidence of its own. Per pair, not per removal, so a weaker candidate in the
+     * removal's own slot can beat a stronger one that fails the higher cross-slot bar.
      */
     private static double minSimilarity(Candidate removed, Candidate added) {
         return inSameSlot(removed, added) ? MIN_IN_SLOT_SIMILARITY : MIN_SIMILARITY;
     }
 
     /**
-     * True when a run of n blocks was replaced by n blocks and these two hold the same
-     * offset in it. Both conditions matter: an unbalanced run has no offset-to-offset
-     * correspondence to appeal to, and two different offsets inside a balanced one are
-     * two different slots.
+     * Both conditions matter: an unbalanced run has no offset-to-offset correspondence to
+     * appeal to, and two different offsets inside a balanced one are two different slots.
      */
     private static boolean inSameSlot(Candidate removed, Candidate added) {
         return removed.balanced()
@@ -313,9 +212,8 @@ public class DiffEngine {
     }
 
     /**
-     * The share of the two word sequences that survived unchanged, counted over both
-     * sides so that a paragraph merely appended to does not score the same as one
-     * rewritten to the same length.
+     * Counted over both sides, so that a paragraph merely appended to does not score the
+     * same as one rewritten to the same length.
      */
     private double similarity(List<String> before, List<String> after) {
         if (before.isEmpty() || after.isEmpty()) {
@@ -351,9 +249,8 @@ public class DiffEngine {
     }
 
     /**
-     * Keeps the position a paragraph has in the stored list while dropping the ones
-     * that fold to nothing, so an ad container between two paragraphs neither counts
-     * as a change nor shifts the indices the result reports.
+     * Paragraphs that fold to nothing are dropped but keep their stored index, so an ad
+     * container between two paragraphs neither counts as a change nor shifts the indices.
      */
     private List<Block> blocks(List<String> paragraphs) {
         List<Block> blocks = new ArrayList<>();
@@ -379,19 +276,16 @@ public class DiffEngine {
         return words.stream().map(folding::normalize).toList();
     }
 
-    /** A paragraph as compared: where it sits, what it says, and what it says folded. */
     private record Block(int index, String text, String folded) {
     }
 
     /**
-     * A paragraph inside a differing run, with both positions the diff gave it: its own
-     * index on its side, and where the run sits on the other. The second is what lets a
-     * lone removal be sorted into the later version's reading order.
+     * Carries both positions the diff gave it -- its own index, and where the run sits on
+     * the other side -- because the second is what sorts a lone removal into the later
+     * version's reading order.
      *
-     * <p>{@code deltaIndex}, {@code deltaOffset} and {@code balanced} describe the run
-     * it came out of rather than the paragraph itself, and exist so the edit pass can
-     * ask whether two candidates share a slot. They are not positions in either
-     * version and never reach the result.
+     * <p>{@code deltaIndex}, {@code deltaOffset} and {@code balanced} describe the run,
+     * not the paragraph; they are not positions and never reach the result.
      */
     private record Candidate(Block block, int sourcePosition, int targetPosition,
                              int deltaIndex, int deltaOffset, boolean balanced) {
