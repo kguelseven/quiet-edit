@@ -7,6 +7,18 @@ An article that is edited after publication usually says nothing about it. This
 service polls the feeds, re-fetches known articles on a decaying schedule, stores
 every observed revision append-only, and lets you diff any two of them.
 
+> [!NOTE]
+> **Quiet Edit is the artefact of an experiment in agent-driven development.**
+> One Claude Code session per ticket, tracked in
+> [beads](https://github.com/gastownhall/beads), every decision written back into
+> the ticket graph as a close reason. Planning started with 23 tickets, the build
+> ended at 63, and 33 of the new ones the agent filed itself against the ticket
+> they surfaced from. The known limitations at the bottom of this file come out of
+> those close reasons.
+>
+> Write-up (German):
+> [Ein Gedächtnis aus Tickets](https://korhan.org/blog/ein-gedaechtnis-aus-tickets/)
+
 ## How it works
 
 One ingest run does the whole path:
